@@ -1,0 +1,33 @@
+package z:privalend@0.1.0;
+
+world privalend {
+  import host:tenant/tenant-context@1.0.0;
+  import host:interfaces/logging@2.1.0;
+  import host:interfaces/kv-store@2.1.0;
+  import host:interfaces/http@2.1.0;
+  import host:interfaces/http-with-placeholders@2.1.0;
+
+  export contracts;
+}
+
+interface contracts {
+  record generic-input {
+    input:        option<list<u8>>,
+    user-profile: option<list<u8>>,
+    context:      option<list<u8>>,
+  }
+
+  /// Assess user creditworthiness inside the TEE.
+  /// Reads financial data from KV store, computes score.
+  /// Returns only tier + score (not raw financial data).
+  assess-eligibility: func(req: generic-input) -> result<list<u8>, string>;
+
+  /// Fetch loan offers from multiple lenders.
+  /// Uses http::call with eligibility tier (no PII).
+  fetch-offers: func(req: generic-input) -> result<list<u8>, string>;
+
+  /// Submit loan application using http-with-placeholders.
+  /// PII is resolved from user profile inside the enclave.
+  /// Agent never sees the plaintext PII.
+  submit-application: func(req: generic-input) -> result<list<u8>, string>;
+}
