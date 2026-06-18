@@ -1,9 +1,8 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import type { InspectorEvent } from "@/hooks/useWorkflow";
-import { CodeBlock } from "./CodeBlock";
 
 interface Props {
   events: InspectorEvent[];
@@ -11,12 +10,19 @@ interface Props {
 }
 
 export function InspectorPanel({ events, currentStep }: Props) {
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const agentScrollRef = useRef<HTMLDivElement>(null);
+  const teeScrollRef = useRef<HTMLDivElement>(null);
+
+  const agentEvents = events.filter(
+    (e) => e.type === "agent_action" || e.type === "agent_received" || e.type === "system" || e.type === "placeholder_before" || e.type === "audit_log" || e.type === "error"
+  );
+  const teeEvents = events.filter(
+    (e) => e.type === "tee_simulated" || e.type === "cross_tenant" || e.type === "placeholder_after"
+  );
 
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
+    if (agentScrollRef.current) agentScrollRef.current.scrollTop = agentScrollRef.current.scrollHeight;
+    if (teeScrollRef.current) teeScrollRef.current.scrollTop = teeScrollRef.current.scrollHeight;
   }, [events]);
 
   return (
@@ -26,7 +32,7 @@ export function InspectorPanel({ events, currentStep }: Props) {
         <div className="flex items-center gap-2">
           <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
           <span className="text-xs font-semibold tracking-wider uppercase text-[var(--inspector-text)]">
-            T3N Enclave Inspector
+            🔍 T3N Data Exposure Dashboard
           </span>
         </div>
         <div className="flex items-center gap-2 text-[10px] text-[var(--inspector-gray)]">
@@ -36,102 +42,188 @@ export function InspectorPanel({ events, currentStep }: Props) {
         </div>
       </div>
 
-      {/* Legend */}
-      <div className="flex items-center gap-3 px-4 py-2 border-b border-[var(--inspector-border)] text-[10px]">
-        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-500" /> System</span>
-        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-yellow-500" /> Agent Call</span>
-        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-green-500" /> Received</span>
-        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-gray-500" /> TEE Internal</span>
-        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500" /> Placeholder</span>
+      {/* Dual-Panel Grid */}
+      <div className="flex-1 grid grid-cols-2 gap-0 overflow-hidden">
+        {/* LEFT: Agent View */}
+        <div className="flex flex-col border-r border-[var(--inspector-border)] overflow-hidden">
+          <div className="px-3 py-2 border-b border-[var(--inspector-border)] bg-[#1c2028]">
+            <div className="flex items-center gap-2">
+              <span className="text-xs">🤖</span>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
+                Agent Memory
+              </span>
+            </div>
+            <p className="text-[9px] text-gray-500 mt-0.5">Restricted — No PII access</p>
+          </div>
+          <div ref={agentScrollRef} className="flex-1 overflow-y-auto scrollbar-thin px-2 py-2 space-y-1.5 bg-[#13161b]">
+            {agentEvents.length === 0 && (
+              <div className="flex flex-col items-center justify-center h-full text-gray-600 text-center">
+                <span className="text-2xl mb-2">🤖</span>
+                <p className="text-[10px]">Agent is idle</p>
+              </div>
+            )}
+            <AnimatePresence>
+              {agentEvents.map((event) => (
+                <motion.div
+                  key={event.id}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.3 }}
+                >
+                  <AgentEventCard event={event} />
+                </motion.div>
+              ))}
+            </AnimatePresence>
+          </div>
+        </div>
+
+        {/* RIGHT: TEE Enclave View */}
+        <div className="flex flex-col overflow-hidden">
+          <div className="px-3 py-2 border-b border-[var(--inspector-border)] bg-[#0a1628]">
+            <div className="flex items-center gap-2">
+              <span className="text-xs">🛡️</span>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-blue-400">
+                Intel TDX Secure Enclave
+              </span>
+            </div>
+            <p className="text-[9px] text-emerald-600 mt-0.5">Hardware-isolated • Full data access</p>
+          </div>
+          <div ref={teeScrollRef} className="flex-1 overflow-y-auto scrollbar-thin px-2 py-2 space-y-1.5 bg-[#050d1a]">
+            {teeEvents.length === 0 && (
+              <div className="flex flex-col items-center justify-center h-full text-blue-900 text-center">
+                <span className="text-2xl mb-2">🔒</span>
+                <p className="text-[10px] text-blue-700">Enclave standby</p>
+              </div>
+            )}
+            <AnimatePresence>
+              {teeEvents.map((event) => (
+                <motion.div
+                  key={event.id}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.3 }}
+                >
+                  <TeeEventCard event={event} />
+                </motion.div>
+              ))}
+            </AnimatePresence>
+          </div>
+        </div>
       </div>
 
-      {/* Events Stream */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto scrollbar-thin px-3 py-2 space-y-2">
-        {events.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full text-[var(--inspector-gray)] text-center">
-            <div className="text-3xl mb-3">🔒</div>
-            <p className="text-sm">Waiting for workflow...</p>
-            <p className="text-[10px] mt-1">Events will stream here in real-time</p>
-          </div>
-        )}
-
-        <AnimatePresence>
-          {events.map((event) => (
-            <motion.div
-              key={event.id}
-              initial={{ opacity: 0, y: 10, height: 0 }}
-              animate={{ opacity: 1, y: 0, height: "auto" }}
-              transition={{ duration: 0.3 }}
-            >
-              <EventCard event={event} />
-            </motion.div>
-          ))}
-        </AnimatePresence>
-
-        {events.length > 0 && (
-          <div className="typewriter-cursor text-[var(--inspector-gray)] text-[10px] pt-1" />
-        )}
+      {/* Bottom Legend */}
+      <div className="flex items-center justify-between px-4 py-2 border-t border-[var(--inspector-border)] text-[9px] text-[var(--inspector-gray)]">
+        <span>🤖 Agent sees: scores, tiers, offers only</span>
+        <span>🛡️ TEE sees: income, debt, PII, computations</span>
       </div>
     </div>
   );
 }
 
-function EventCard({ event }: { event: InspectorEvent }) {
-  const borderColor = getBorderColor(event.type, event.highlight);
-  const icon = getIcon(event.type);
-  const labelColor = getLabelColor(event.highlight);
-
+function AgentEventCard({ event }: { event: InspectorEvent }) {
+  const isError = event.type === "error" || event.highlight === "red";
   return (
-    <div className={`rounded border-l-2 ${borderColor} bg-[#161b22] px-3 py-2`}>
-      <div className="flex items-center gap-2 mb-1">
-        <span className="text-xs">{icon}</span>
-        <span className={`text-[11px] font-semibold ${labelColor}`}>{event.title}</span>
-        <span className="text-[9px] text-[var(--inspector-gray)] ml-auto">
-          {new Date(event.timestamp).toLocaleTimeString()}
+    <div className={`rounded px-2 py-1.5 border-l-2 ${
+      isError ? "border-red-500 bg-red-950/30" :
+      event.highlight === "green" ? "border-green-600 bg-green-950/20" :
+      event.highlight === "yellow" ? "border-yellow-600 bg-yellow-950/10" :
+      "border-gray-600 bg-[#1a1e25]"
+    }`}>
+      <div className="flex items-center gap-1.5 mb-0.5">
+        <span className="text-[10px]">{getAgentIcon(event)}</span>
+        <span className={`text-[10px] font-semibold ${isError ? "text-red-400" : "text-gray-300"}`}>
+          {event.title}
         </span>
       </div>
-      <CodeBlock content={event.content} highlight={event.highlight} type={event.type} />
+      <pre className={`text-[10px] whitespace-pre-wrap break-words leading-relaxed ${
+        isError ? "text-red-300/80" :
+        event.highlight === "green" ? "text-green-300/80" :
+        "text-gray-400"
+      }`}>
+        {redactForAgent(event)}
+      </pre>
     </div>
   );
 }
 
-function getBorderColor(type: string, highlight?: string): string {
-  if (highlight === "red") return "border-red-500";
-  if (highlight === "green") return "border-green-500";
-  if (highlight === "yellow") return "border-yellow-500";
-  if (highlight === "blue") return "border-blue-500";
-  if (highlight === "gray") return "border-gray-600";
-  switch (type) {
-    case "cross_tenant": return "border-yellow-500";
-    case "tee_simulated": return "border-gray-600";
-    case "agent_received": return "border-green-500";
-    case "error": return "border-red-500";
-    default: return "border-blue-500";
-  }
+function TeeEventCard({ event }: { event: InspectorEvent }) {
+  return (
+    <div className={`rounded px-2 py-1.5 border-l-2 ${
+      event.type === "placeholder_after" ? "border-green-500 bg-green-950/20" :
+      event.type === "cross_tenant" ? "border-yellow-500 bg-yellow-950/10" :
+      "border-blue-600 bg-blue-950/20"
+    }`}>
+      <div className="flex items-center gap-1.5 mb-0.5">
+        <span className="text-[10px]">{getTeeIcon(event)}</span>
+        <span className={`text-[10px] font-semibold ${
+          event.type === "placeholder_after" ? "text-green-400" :
+          event.type === "cross_tenant" ? "text-yellow-400" :
+          "text-blue-400"
+        }`}>
+          {event.title}
+        </span>
+      </div>
+      <TypewriterText content={event.content} className={`text-[10px] whitespace-pre-wrap break-words leading-relaxed ${
+        event.type === "placeholder_after" ? "text-green-300/90" : "text-emerald-300/80"
+      }`} />
+    </div>
+  );
 }
 
-function getIcon(type: string): string {
-  switch (type) {
-    case "system": return "⚙️";
-    case "agent_action": return "🤖";
-    case "agent_received": return "📥";
-    case "tee_simulated": return "🔒";
-    case "placeholder_before": return "📤";
-    case "placeholder_after": return "✅";
-    case "cross_tenant": return "🔗";
-    case "audit_log": return "📋";
-    case "error": return "❌";
-    default: return "•";
-  }
+const typedContentCache = new Set<string>();
+
+function TypewriterText({ content, className }: { content: string; className: string }) {
+  const alreadyTyped = typedContentCache.has(content);
+  const [displayText, setDisplayText] = useState(alreadyTyped ? content : "");
+  const [done, setDone] = useState(alreadyTyped);
+
+  useEffect(() => {
+    if (alreadyTyped) return;
+    let i = 0;
+    const interval = setInterval(() => {
+      i++;
+      if (i >= content.length) {
+        setDisplayText(content);
+        setDone(true);
+        typedContentCache.add(content);
+        clearInterval(interval);
+      } else {
+        setDisplayText(content.slice(0, i));
+      }
+    }, 12);
+    return () => clearInterval(interval);
+  }, [content, alreadyTyped]);
+
+  return (
+    <pre className={className}>
+      {displayText}
+      {!done && <span className="animate-pulse text-green-400">▊</span>}
+    </pre>
+  );
 }
 
-function getLabelColor(highlight?: string): string {
-  switch (highlight) {
-    case "red": return "text-red-400";
-    case "green": return "text-green-400";
-    case "yellow": return "text-yellow-400";
-    case "blue": return "text-blue-400";
-    case "gray": return "text-gray-400";
-    default: return "text-[var(--inspector-text)]";
+function redactForAgent(event: InspectorEvent): string {
+  const content = event.content;
+  if (event.type === "placeholder_before") {
+    return content;
   }
+  if (event.highlight === "green" && event.type === "agent_received") {
+    return content;
+  }
+  return content;
+}
+
+function getAgentIcon(event: InspectorEvent): string {
+  if (event.type === "error") return "❌";
+  if (event.type === "agent_received") return "📥";
+  if (event.type === "agent_action") return "📤";
+  if (event.type === "placeholder_before") return "🔴";
+  if (event.type === "audit_log") return "📋";
+  return "⚙️";
+}
+
+function getTeeIcon(event: InspectorEvent): string {
+  if (event.type === "cross_tenant") return "🔗";
+  if (event.type === "placeholder_after") return "✅";
+  return "🔐";
 }

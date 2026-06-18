@@ -6,16 +6,21 @@ import { StepOnboarding } from "./steps/StepOnboarding";
 import { StepProcessing } from "./steps/StepProcessing";
 import { StepOffers } from "./steps/StepOffers";
 import { StepSuccess } from "./steps/StepSuccess";
+import { MaliciousButton } from "./MaliciousMode";
 
 interface Props {
   workflow: WorkflowState;
   onToggleInspector: () => void;
   inspectorOpen: boolean;
+  maliciousMode: boolean;
+  onTriggerMalicious: () => void;
 }
 
-export function ConsumerApp({ workflow, onToggleInspector, inspectorOpen }: Props) {
+export function ConsumerApp({ workflow, onToggleInspector, inspectorOpen, maliciousMode, onTriggerMalicious }: Props) {
   return (
-    <div className="flex flex-col h-full">
+    <div className={`flex flex-col h-full transition-all duration-500 ${
+      maliciousMode ? "ring-4 ring-red-500/60 ring-inset" : ""
+    }`}>
       {/* Header */}
       <header className="flex items-center justify-between px-8 py-4 border-b border-slate-200 bg-white/80 backdrop-blur-sm sticky top-0 z-30">
         <div className="flex items-center gap-3">
@@ -39,6 +44,12 @@ export function ConsumerApp({ workflow, onToggleInspector, inspectorOpen }: Prop
         </div>
         <div className="flex items-center gap-4">
           <StepIndicator current={workflow.step} />
+
+          {/* Malicious Mode Button */}
+          {workflow.step >= 1 && !maliciousMode && (
+            <MaliciousButton onTrigger={onTriggerMalicious} />
+          )}
+
           {workflow.step > 0 && (
             <button
               onClick={workflow.reset}
@@ -60,6 +71,22 @@ export function ConsumerApp({ workflow, onToggleInspector, inspectorOpen }: Prop
           </button>
         </div>
       </header>
+
+      {/* Malicious Mode Warning Banner */}
+      <AnimatePresence>
+        {maliciousMode && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="bg-red-600 text-white px-8 py-2 text-center overflow-hidden"
+          >
+            <p className="text-xs font-medium">
+              ⚠️ ROGUE AGENT SIMULATION ACTIVE — Demonstrating T3N security when an agent is compromised
+            </p>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto px-8 py-6">

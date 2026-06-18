@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { motion } from "framer-motion";
 import type { LoanOffer } from "@/hooks/useWorkflow";
 
@@ -10,6 +11,13 @@ interface Props {
 }
 
 export function StepOffers({ offers, onSelect, isLoading }: Props) {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  const handleSelect = (offerId: string) => {
+    setSelectedId(offerId);
+    onSelect(offerId);
+  };
+
   return (
     <div className="max-w-lg mx-auto pt-4">
       <div className="text-center mb-6">
@@ -31,7 +39,13 @@ export function StepOffers({ offers, onSelect, isLoading }: Props) {
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: i * 0.1 }}
           >
-            <OfferCard offer={offer} onSelect={onSelect} isLoading={isLoading} isBest={i === 0} />
+            <OfferCard
+              offer={offer}
+              onSelect={handleSelect}
+              isSubmitting={isLoading && selectedId === offer.id}
+              isDisabled={isLoading}
+              isBest={i === 0}
+            />
           </motion.div>
         ))}
       </div>
@@ -44,7 +58,13 @@ export function StepOffers({ offers, onSelect, isLoading }: Props) {
   );
 }
 
-function OfferCard({ offer, onSelect, isLoading, isBest }: { offer: LoanOffer; onSelect: (id: string) => void; isLoading: boolean; isBest: boolean }) {
+function OfferCard({ offer, onSelect, isSubmitting, isDisabled, isBest }: {
+  offer: LoanOffer;
+  onSelect: (id: string) => void;
+  isSubmitting: boolean;
+  isDisabled: boolean;
+  isBest: boolean;
+}) {
   return (
     <div className={`relative p-5 rounded-xl border transition-all hover:shadow-md ${
       isBest ? "bg-white border-blue-200 shadow-sm" : "bg-white border-slate-100"
@@ -80,19 +100,29 @@ function OfferCard({ offer, onSelect, isLoading, isBest }: { offer: LoanOffer; o
       </div>
 
       <motion.button
-        whileHover={{ scale: 1.01 }}
-        whileTap={{ scale: 0.99 }}
+        whileHover={{ scale: isDisabled ? 1 : 1.01 }}
+        whileTap={{ scale: isDisabled ? 1 : 0.99 }}
         onClick={() => onSelect(offer.id)}
-        disabled={isLoading}
+        disabled={isDisabled}
         className={`w-full mt-4 py-2.5 rounded-lg font-medium text-sm transition-all ${
-          isLoading
-            ? "bg-slate-100 text-slate-400 cursor-not-allowed"
-            : isBest
-              ? "bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-sm hover:shadow-md"
-              : "bg-slate-900 text-white hover:bg-slate-800"
+          isSubmitting
+            ? "bg-blue-100 text-blue-600 cursor-wait"
+            : isDisabled
+              ? "bg-slate-100 text-slate-400 cursor-not-allowed"
+              : isBest
+                ? "bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-sm hover:shadow-md"
+                : "bg-slate-900 text-white hover:bg-slate-800"
         }`}
       >
-        {isLoading ? "Submitting..." : "One-Click Apply →"}
+        {isSubmitting ? (
+          <span className="flex items-center justify-center gap-2">
+            <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+            Submitting via TEE...
+          </span>
+        ) : "One-Click Apply →"}
       </motion.button>
     </div>
   );

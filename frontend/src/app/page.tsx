@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ConsumerApp } from "@/components/ConsumerApp";
 import { InspectorDrawer } from "@/components/InspectorDrawer";
@@ -9,11 +9,27 @@ import { useWorkflow } from "@/hooks/useWorkflow";
 export default function Home() {
   const workflow = useWorkflow();
   const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [maliciousMode, setMaliciousMode] = useState(false);
+
+  const handleTriggerMalicious = useCallback(() => {
+    setMaliciousMode(true);
+    setInspectorOpen(true);
+  }, []);
+
+  const handleMaliciousComplete = useCallback(() => {
+    setMaliciousMode(false);
+  }, []);
 
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-gradient-to-br from-slate-50 to-blue-50">
       {/* Full-width Consumer App */}
-      <ConsumerApp workflow={workflow} onToggleInspector={() => setInspectorOpen(!inspectorOpen)} inspectorOpen={inspectorOpen} />
+      <ConsumerApp
+        workflow={workflow}
+        onToggleInspector={() => setInspectorOpen(!inspectorOpen)}
+        inspectorOpen={inspectorOpen}
+        maliciousMode={maliciousMode}
+        onTriggerMalicious={handleTriggerMalicious}
+      />
 
       {/* Inspector Drawer (overlay from right) */}
       <InspectorDrawer
@@ -21,6 +37,8 @@ export default function Home() {
         onClose={() => setInspectorOpen(false)}
         events={workflow.events}
         currentStep={workflow.step}
+        maliciousMode={maliciousMode}
+        onMaliciousComplete={handleMaliciousComplete}
       />
 
       {/* Floating Inspector toggle (always visible) */}
