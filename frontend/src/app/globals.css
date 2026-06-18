@@ -1,0 +1,65 @@
+@import "tailwindcss";
+
+:root {
+  --inspector-bg: #0d1117;
+  --inspector-border: #21262d;
+  --inspector-text: #c9d1d9;
+  --inspector-green: #3fb950;
+  --inspector-red: #f85149;
+  --inspector-yellow: #d29922;
+  --inspector-blue: #58a6ff;
+  --inspector-gray: #6e7681;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+.inspector-panel {
+  background: var(--inspector-bg);
+  color: var(--inspector-text);
+  font-family: "SF Mono", "Fira Code", "JetBrains Mono", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.typewriter-cursor::after {
+  content: "▊";
+  animation: blink 1s step-end infinite;
+}
+
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 5px rgba(59, 130, 246, 0.3); }
+  50% { box-shadow: 0 0 20px rgba(59, 130, 246, 0.6); }
+}
+
+.glow-pulse {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+@keyframes scan-line {
+  0% { transform: translateY(-100%); }
+  100% { transform: translateY(100%); }
+}
+
+.scan-animation {
+  animation: scan-line 2s ease-in-out infinite;
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  width: 6px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: #30363d;
+  border-radius: 3px;
+}
