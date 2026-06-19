@@ -4,6 +4,7 @@ import { config } from "../config.js";
 import { emitInspectorEvent } from "../websocket.js";
 import type { TenantDeployment } from "./tenant-setup.js";
 import { seedProfileToKV, seedFraudBlacklist, removeFraudBlacklist, type FinancialProfile } from "./seed-profile.js";
+import { issueCreditCredential, type CredentialIssueResult } from "./issue-credential.js";
 
 let lastLogSeq: Record<string, number> = {};
 
@@ -59,6 +60,7 @@ export interface WorkflowResult {
   eligibility: { score: number; tier: string; max_loan_amount: number };
   offers: LoanOffer[];
   applicationResult?: { status: string; reference: string; lender: string };
+  credential?: CredentialIssueResult;
 }
 
 export interface ProfileInput {
@@ -318,6 +320,24 @@ export async function runAgentWorkflow(
 
     result.step = "application_submitted";
     result.applicationResult = applicationResult as { status: string; reference: string; lender: string };
+
+    // ===== STEP 4b: Issue Verifiable Credit Credential (TEE first, demo fallback) =====
+    const appRef = (applicationResult as { reference: string }).reference;
+    result.credential = await issueCreditCredential(
+      {
+        userDid,
+        score: eligibility.score,
+        tier: eligibility.tier,
+        maxLoanAmount: eligibility.max_loan_amount,
+        reference: appRef,
+        issuerDid: privalend.auth.did,
+      },
+      privalend,
+      agent,
+      4
+    );
+
+    await fetchAndEmitTeeLogs(privalend, 4, "PrivaLend VC Issuance Enclave");
   }
 
   // Cleanup: remove Bob from blacklist after successful non-flagged flow (shouldn't happen, but safe)

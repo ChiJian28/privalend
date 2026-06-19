@@ -17,7 +17,7 @@ export function InspectorPanel({ events, currentStep }: Props) {
     (e) => e.type === "agent_action" || e.type === "agent_received" || e.type === "system" || e.type === "placeholder_before" || e.type === "audit_log" || e.type === "error"
   );
   const teeEvents = events.filter(
-    (e) => e.type === "tee_simulated" || e.type === "tee_log" || e.type === "cross_tenant" || e.type === "placeholder_after"
+    (e) => e.type === "tee_simulated" || e.type === "tee_log" || e.type === "cross_tenant" || e.type === "placeholder_after" || e.type === "vc_issued"
   );
 
   useEffect(() => {
@@ -148,8 +148,10 @@ function AgentEventCard({ event }: { event: InspectorEvent }) {
 
 function TeeEventCard({ event }: { event: InspectorEvent }) {
   const isLiveLog = event.type === "tee_log";
+  const isVc = event.type === "vc_issued";
   return (
     <div className={`rounded px-2 py-1.5 border-l-2 ${
+      isVc ? "border-purple-500 bg-purple-950/25 ring-1 ring-purple-700/30" :
       isLiveLog ? "border-cyan-400 bg-cyan-950/20 ring-1 ring-cyan-800/30" :
       event.type === "placeholder_after" ? "border-green-500 bg-green-950/20" :
       event.type === "cross_tenant" ? "border-yellow-500 bg-yellow-950/10" :
@@ -158,6 +160,7 @@ function TeeEventCard({ event }: { event: InspectorEvent }) {
       <div className="flex items-center gap-1.5 mb-0.5">
         <span className="text-[10px]">{getTeeIcon(event)}</span>
         <span className={`text-[10px] font-semibold ${
+          isVc ? "text-purple-300" :
           isLiveLog ? "text-cyan-300" :
           event.type === "placeholder_after" ? "text-green-400" :
           event.type === "cross_tenant" ? "text-yellow-400" :
@@ -170,11 +173,24 @@ function TeeEventCard({ event }: { event: InspectorEvent }) {
             LIVE FROM TEE
           </span>
         )}
+        {isVc && (
+          <span className={`ml-auto px-1.5 py-0.5 rounded text-[8px] font-bold tracking-wider border ${
+            event.highlight === "green"
+              ? "bg-emerald-900/60 text-emerald-300 border-emerald-700/40"
+              : "bg-amber-900/60 text-amber-300 border-amber-700/40"
+          }`}>
+            W3C VC
+          </span>
+        )}
       </div>
-      <TypewriterText content={event.content} className={`text-[10px] whitespace-pre-wrap break-words leading-relaxed font-mono ${
-        isLiveLog ? "text-cyan-200/90" :
-        event.type === "placeholder_after" ? "text-green-300/90" : "text-emerald-300/80"
-      }`} />
+      {isVc ? (
+        <VcJsonHighlight content={event.content} />
+      ) : (
+        <TypewriterText content={event.content} className={`text-[10px] whitespace-pre-wrap break-words leading-relaxed font-mono ${
+          isLiveLog ? "text-cyan-200/90" :
+          event.type === "placeholder_after" ? "text-green-300/90" : "text-emerald-300/80"
+        }`} />
+      )}
     </div>
   );
 }
@@ -232,8 +248,39 @@ function getAgentIcon(event: InspectorEvent): string {
 }
 
 function getTeeIcon(event: InspectorEvent): string {
+  if (event.type === "vc_issued") return "🪪";
   if (event.type === "tee_log") return "📡";
   if (event.type === "cross_tenant") return "🔗";
   if (event.type === "placeholder_after") return "✅";
   return "🔐";
+}
+
+function VcJsonHighlight({ content }: { content: string }) {
+  const lines = content.split("\n");
+  return (
+    <pre className="text-[10px] whitespace-pre-wrap break-words leading-relaxed font-mono">
+      {lines.map((line, i) => {
+        const isContext = line.includes('"@context"') || line.includes("w3.org/2018/credentials");
+        const isProof =
+          line.includes('"proof"') ||
+          line.includes("proofValue") ||
+          line.includes("proofPurpose") ||
+          line.includes('"jws"') ||
+          line.includes("verificationMethod");
+        return (
+          <span
+            key={i}
+            className={
+              isContext ? "text-yellow-300 font-bold" :
+              isProof ? "text-pink-300 font-bold" :
+              "text-emerald-300/90"
+            }
+          >
+            {line}
+            {"\n"}
+          </span>
+        );
+      })}
+    </pre>
+  );
 }

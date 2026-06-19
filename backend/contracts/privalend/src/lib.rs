@@ -11,6 +11,7 @@ wit_bindgen::generate!({
 mod eligibility;
 mod offers;
 mod application;
+mod issue_vc;
 
 struct Component;
 
@@ -29,6 +30,11 @@ impl exports::z::privalend::contracts::Guest for Component {
     fn submit_application(req: exports::z::privalend::contracts::GenericInput) -> Result<Vec<u8>, String> {
         let input = req.input.ok_or("submit-application: missing input")?;
         application::submit_application(&input)
+    }
+
+    fn issue_credit_credential(req: exports::z::privalend::contracts::GenericInput) -> Result<Vec<u8>, String> {
+        let input = req.input.ok_or("issue-credit-credential: missing input")?;
+        issue_vc::issue_credit_credential(&input)
     }
 }
 

@@ -2,13 +2,16 @@
 
 import { motion } from "framer-motion";
 import { AuditTrailButton } from "../AuditTrail";
+import { CreditCredentialCard } from "../CreditCredentialCard";
+import type { CredentialIssueResult } from "@/lib/credential";
 
 interface Props {
   result: { status: string; reference: string; lender: string } | null;
   eligibility?: { score: number; tier: string; max_loan_amount: number; approved: boolean } | null;
+  credential?: CredentialIssueResult | null;
 }
 
-export function StepSuccess({ result, eligibility }: Props) {
+export function StepSuccess({ result, eligibility, credential }: Props) {
   if (!result) return null;
 
   return (
@@ -81,6 +84,14 @@ export function StepSuccess({ result, eligibility }: Props) {
         creditScore: eligibility?.score,
         tier: eligibility?.tier,
       }} />
+
+      {/* Verifiable Credit Credential — after audit trail */}
+      {credential && (
+        <CreditCredentialCard
+          key={`${credential.credential.id}-${credential.credential.issuanceDate}`}
+          credentialResult={credential}
+        />
+      )}
 
       <p className="text-[10px] text-slate-400 mt-6">
         The entire application was processed without the AI agent ever accessing your name, ID number, or financial data.

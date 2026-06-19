@@ -30,4 +30,9 @@ interface contracts {
   /// PII is resolved from user profile inside the enclave.
   /// Agent never sees the plaintext PII.
   submit-application: func(req: generic-input) -> result<list<u8>, string>;
+
+  /// Issue a W3C Verifiable Credit Credential inside the TEE.
+  /// Claims are assembled in-enclave; cryptographic signing via
+  /// sign-sd-jwt-vc will attach when the host interface is available.
+  issue-credit-credential: func(req: generic-input) -> result<list<u8>, string>;
 }

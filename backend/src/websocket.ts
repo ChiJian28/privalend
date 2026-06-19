@@ -11,6 +11,7 @@ export type InspectorEventType =
   | "placeholder_after"
   | "cross_tenant"
   | "audit_log"
+  | "vc_issued"
   | "error";
 
 export interface InspectorEvent {
@@ -61,6 +62,7 @@ function getPrefix(type: InspectorEventType): string {
     case "placeholder_after": return "✅";
     case "cross_tenant": return "🔗";
     case "audit_log": return "📋";
+    case "vc_issued": return "🪪";
     case "error": return "❌";
   }
 }

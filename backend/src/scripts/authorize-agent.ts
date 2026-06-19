@@ -60,7 +60,7 @@ async function main() {
   const userContractVersion = await getScriptVersion(getNodeUrl(), "tee:user/contracts");
 
   console.log(`\n  Authorizing agent to call:`);
-  console.log(`    - ${PRIVALEND_SCRIPT} [assess-eligibility, fetch-offers, submit-application]`);
+  console.log(`    - ${PRIVALEND_SCRIPT} [assess-eligibility, fetch-offers, submit-application, issue-credit-credential]`);
   console.log(`    - ${CONSORTIUM_SCRIPT} [check-blacklist]`);
   console.log(`    - Allowed hosts: [localhost:4000]\n`);
 
@@ -79,7 +79,7 @@ async function main() {
           {
             scriptName: PRIVALEND_SCRIPT,
             versionReq: privalendVersion,
-            functions: ["assess-eligibility", "fetch-offers", "submit-application"],
+            functions: ["assess-eligibility", "fetch-offers", "submit-application", "issue-credit-credential"],
             allowedHosts: ["localhost:4000"],
           },
           {

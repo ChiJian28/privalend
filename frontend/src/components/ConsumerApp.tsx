@@ -108,7 +108,11 @@ export function ConsumerApp({ workflow, onToggleInspector, inspectorOpen, malici
           )}
           {workflow.step === 4 && (
             <FadeIn key="step4">
-              <StepSuccess result={workflow.applicationResult} eligibility={workflow.eligibility} />
+              <StepSuccess
+                result={workflow.applicationResult}
+                eligibility={workflow.eligibility}
+                credential={workflow.credential}
+              />
             </FadeIn>
           )}
         </AnimatePresence>

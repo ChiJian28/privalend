@@ -2,12 +2,13 @@
 
 import { useState, useCallback, useEffect, useRef } from "react";
 import { io, type Socket } from "socket.io-client";
+import { buildDemoCredential, clearWalletDemoStorage, type CredentialIssueResult } from "@/lib/credential";
 
 export type WorkflowStep = 0 | 1 | 2 | 3 | 4;
 
 export interface InspectorEvent {
   id: string;
-  type: "system" | "agent_action" | "agent_received" | "tee_simulated" | "tee_log" | "placeholder_before" | "placeholder_after" | "cross_tenant" | "audit_log" | "error";
+  type: "system" | "agent_action" | "agent_received" | "tee_simulated" | "tee_log" | "placeholder_before" | "placeholder_after" | "cross_tenant" | "audit_log" | "vc_issued" | "error";
   step: number;
   title: string;
   content: string;
@@ -45,6 +46,7 @@ export interface WorkflowState {
   eligibility: { score: number; tier: string; max_loan_amount: number; approved: boolean } | null;
   offers: LoanOffer[];
   applicationResult: { status: string; reference: string; lender: string } | null;
+  credential: CredentialIssueResult | null;
   connected: boolean;
   startWorkflow: (options?: StartOptions) => Promise<void>;
   selectOffer: (offerId: string) => Promise<void>;
@@ -66,7 +68,9 @@ export function useWorkflow(): WorkflowState {
   const [eligibility, setEligibility] = useState<WorkflowState["eligibility"]>(null);
   const [offers, setOffers] = useState<LoanOffer[]>([]);
   const [applicationResult, setApplicationResult] = useState<WorkflowState["applicationResult"]>(null);
+  const [credential, setCredential] = useState<CredentialIssueResult | null>(null);
   const [connected, setConnected] = useState(false);
+  const userDidRef = useRef("did:t3n:demo_user_alan_turing");
   const socketRef = useRef<Socket | null>(null);
 
   // Try connecting to backend WebSocket
@@ -121,6 +125,7 @@ export function useWorkflow(): WorkflowState {
   }, [connected]);
 
   const startWorkflow = useCallback(async (options?: StartOptions) => {
+    clearWalletDemoStorage();
     setIsLoading(true);
     setEvents([]);
     eventCounter = 0;
@@ -141,6 +146,7 @@ export function useWorkflow(): WorkflowState {
       } else {
         setStep(3);
       }
+      setCredential(null);
       setIsLoading(false);
       return;
     }
@@ -169,6 +175,8 @@ export function useWorkflow(): WorkflowState {
       simNationality = options.profile.nationality;
       simUserDid = "did:t3n:custom_user";
     }
+
+    userDidRef.current = simUserDid;
 
     // Compute credit score locally for simulation
     const dti = simDebt / Math.max(simIncome, 1);
@@ -211,7 +219,7 @@ export function useWorkflow(): WorkflowState {
       agentDid: "did:t3n:5e3d9ba298d2ec5ab8913965fac01435560cf8ee",
       scripts: [{
         scriptName: "z:6ec1a64ea7733c6b8e87327db829dfae0648a197:privalend",
-        functions: ["assess-eligibility", "fetch-offers", "submit-application"],
+        functions: ["assess-eligibility", "fetch-offers", "submit-application", "issue-credit-credential"],
         allowedHosts: ["localhost:4000"]
       }, {
         scriptName: "z:377025df4be81d8222dd63ecf63a8b351bb109f2:fraud-check",
@@ -296,6 +304,7 @@ export function useWorkflow(): WorkflowState {
     if (backendResult?.success) {
       const result = backendResult.result;
       if (result.applicationResult) setApplicationResult(result.applicationResult);
+      if (result.credential) setCredential(result.credential);
       setStep(4);
       setIsLoading(false);
       return;
@@ -338,11 +347,30 @@ export function useWorkflow(): WorkflowState {
     const result = { status: "approved", reference: "PL-DBS-2026A7F", lender: selected.lender };
     setApplicationResult(result);
 
-    addEvent({ type: "audit_log", step: 4, title: "Immutable Audit Trail (Merkle-backed)", content: `[${new Date().toISOString()}] Loan application complete\n\n  ┌─────────────────────────────────────────┐\n  │ Agent DID:  did:t3n:5e3d9ba2...         │\n  │ User DID:   did:t3n:demo_user_alan      │\n  │ Lender:     ${selected.lender.padEnd(28)}│\n  │ Amount:     $50,000                     │\n  │ Reference:  PL-DBS-2026A7F              │\n  ├─────────────────────────────────────────┤\n  │ PII Exposure to Agent: 0 bytes   ✓      │\n  │ Cross-Tenant Calls:    1 (Consortium)   │\n  │ Placeholder Fields:    5 resolved       │\n  │ Fraud Check:           PASSED           │\n  └─────────────────────────────────────────┘`, highlight: "blue" });
+    addEvent({ type: "audit_log", step: 4, title: "Immutable Audit Trail (Merkle-backed)", content: `[${new Date().toISOString()}] Loan application complete\n\n  ┌─────────────────────────────────────────┐\n  │ Agent DID:  did:t3n:5e3d9ba2...         │\n  │ User DID:   ${userDidRef.current.slice(0, 28).padEnd(28)}│\n  │ Lender:     ${selected.lender.padEnd(28)}│\n  │ Amount:     $50,000                     │\n  │ Reference:  PL-DBS-2026A7F              │\n  ├─────────────────────────────────────────┤\n  │ PII Exposure to Agent: 0 bytes   ✓      │\n  │ Cross-Tenant Calls:    1 (Consortium)   │\n  │ Placeholder Fields:    5 resolved       │\n  │ Fraud Check:           PASSED           │\n  └─────────────────────────────────────────┘`, highlight: "blue" });
+    await delay(600);
+
+    const vcResult = buildDemoCredential({
+      userDid: userDidRef.current,
+      score: eligibility?.score ?? 780,
+      tier: eligibility?.tier ?? "prime",
+      maxLoanAmount: eligibility?.max_loan_amount ?? 150000,
+      reference: result.reference,
+    });
+    setCredential(vcResult);
+
+    addEvent({
+      type: "vc_issued",
+      step: 4,
+      title: "🪪 Verifiable Credit Credential [DEMO MODE]",
+      content: JSON.stringify(vcResult.credential, null, 2),
+      highlight: "yellow",
+    });
     setIsLoading(false);
-  }, [offers, addEvent, callBackend]);
+  }, [offers, addEvent, callBackend, eligibility]);
 
   const reset = useCallback(() => {
+    clearWalletDemoStorage();
     setStep(0);
     setIsLoading(false);
     setEvents([]);
@@ -350,8 +378,9 @@ export function useWorkflow(): WorkflowState {
     setEligibility(null);
     setOffers([]);
     setApplicationResult(null);
+    setCredential(null);
     eventCounter = 0;
   }, []);
 
-  return { step, isLoading, events, fraudResult, eligibility, offers, applicationResult, connected, startWorkflow, selectOffer, reset };
+  return { step, isLoading, events, fraudResult, eligibility, offers, applicationResult, credential, connected, startWorkflow, selectOffer, reset };
 }
