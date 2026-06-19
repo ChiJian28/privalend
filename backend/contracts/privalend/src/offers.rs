@@ -8,6 +8,8 @@ struct OffersInput {
     amount: u64,
     term_months: u32,
     purpose: String,
+    #[serde(default)]
+    credit_score: Option<u32>,
 }
 
 #[derive(Serialize)]
@@ -45,12 +47,15 @@ pub fn fetch_offers(input: &[u8]) -> Result<Vec<u8>, String> {
         .ok_or("lender_api_key not found in secrets")?;
 
     // Call mock bank API to get offers (no PII in this request)
-    let request_body = serde_json::json!({
+    let mut request_body = serde_json::json!({
         "tier": req.tier,
         "requested_amount": req.amount,
         "term_months": req.term_months,
         "purpose": req.purpose,
     });
+    if let Some(score) = req.credit_score {
+        request_body["credit_score"] = serde_json::json!(score);
+    }
 
     let resp = http_iface::call(&http_iface::Request {
         method: http_iface::Verb::Post,

@@ -3,6 +3,7 @@ import { createAgentClient } from "./client.js";
 import { config } from "../config.js";
 import { emitInspectorEvent } from "../websocket.js";
 import type { TenantDeployment } from "./tenant-setup.js";
+import { seedProfileToKV, seedFraudBlacklist, removeFraudBlacklist, type FinancialProfile } from "./seed-profile.js";
 
 export interface LoanOffer {
   id: string;
@@ -17,20 +18,24 @@ export interface LoanOffer {
 export interface WorkflowResult {
   step: string;
   fraudCheck: { is_flagged: boolean; risk_level: string };
-  eligibility: { score: number; tier: string; maxLoanAmount: number };
+  eligibility: { score: number; tier: string; max_loan_amount: number };
   offers: LoanOffer[];
   applicationResult?: { status: string; reference: string; lender: string };
 }
 
-export interface CustomProfileOverride {
-  profile: { annual_income: number; total_debt: number; nationality: string };
-  eligibility: { score: number; tier: string; max_loan_amount: number; debt_to_income_ratio: number; approved: boolean };
-  isFlagged?: boolean;
+export interface ProfileInput {
+  annual_income: number;
+  total_debt: number;
+  nationality: string;
 }
 
 /**
  * Main agent workflow: the AI agent orchestrates the loan application
- * without ever seeing user PII
+ * without ever seeing user PII.
+ *
+ * If a custom profile is provided, it is first sealed into T3N KV store
+ * (bypassing the Agent), then the Agent calls TEE contracts which read
+ * from KV store internally — full TEE execution path.
  */
 export async function runAgentWorkflow(
   userDid: string,
@@ -38,14 +43,32 @@ export async function runAgentWorkflow(
   privalend: TenantDeployment,
   consortium: TenantDeployment,
   selectedOfferId?: string,
-  customProfile?: CustomProfileOverride
+  profileInput?: ProfileInput,
+  isFlagged?: boolean
 ): Promise<WorkflowResult> {
-  // Initialize agent client
+  // ===== PRE-STEP: Seed custom profile into T3N KV store (bypasses Agent) =====
+  if (profileInput) {
+    const profile: FinancialProfile = {
+      annual_income: profileInput.annual_income,
+      total_debt: profileInput.total_debt,
+      employment_years: profileInput.annual_income >= 100000 ? 5 : profileInput.annual_income >= 60000 ? 3 : 1,
+      has_collateral: profileInput.annual_income >= 120000,
+      credit_history_months: Math.min(Math.round(profileInput.annual_income / 2000), 120),
+    };
+    await seedProfileToKV(privalend.auth, profile);
+  }
+
+  // Seed Bob into blacklist if flagged
+  if (isFlagged) {
+    await seedFraudBlacklist(consortium.auth, userDid, "multi-lending fraud (demo persona)");
+  }
+
+  // ===== STEP 1: Initialize Agent =====
   emitInspectorEvent({
     type: "system",
     step: 1,
     title: "Agent Initialization",
-    content: `Authenticating agent with DID...`,
+    content: `Authenticating agent with DID...\nNote: Agent has NO access to the user's financial profile in KV store.`,
   });
 
   const agent = await createAgentClient(config.agent.apiKey);
@@ -54,36 +77,25 @@ export async function runAgentWorkflow(
     type: "system",
     step: 1,
     title: "Agent Authenticated",
-    content: `Agent DID: ${agent.did}\nAgent has NO access to user PII.`,
+    content: `Agent DID: ${agent.did}\nAgent has NO access to user PII or KV store entries.\nAll financial data is sealed inside T3N TEE.`,
     highlight: "blue",
   });
 
-  // ===== STEP 2: Cross-Tenant Fraud Check =====
+  // ===== STEP 2: Cross-Tenant Fraud Check (REAL TEE) =====
   emitInspectorEvent({
     type: "cross_tenant",
     step: 2,
-    title: "Cross-Tenant Fraud Check",
-    content: `Calling Fraud Consortium contract...\nexecuteBusinessContract("${consortium.scriptName}", "check-blacklist")`,
+    title: "Cross-Tenant Fraud Check (Real TEE)",
+    content: `Calling Fraud Consortium contract...\nexecuteBusinessContract("${consortium.scriptName}", "check-blacklist")\nInput: { user_did: "${userDid}" }`,
     highlight: "yellow",
   });
 
-  let fraudResult: any;
-  if (customProfile) {
-    // Use override (for custom profile / persona modes)
-    fraudResult = {
-      is_flagged: customProfile.isFlagged || false,
-      risk_level: customProfile.isFlagged ? "critical" : "low",
-      checked_at: new Date().toISOString(),
-      consortium_id: consortium.scriptName,
-    };
-  } else {
-    fraudResult = await agent.client.executeAndDecode({
-      script_name: consortium.scriptName,
-      script_version: consortium.scriptVersion,
-      function_name: "check-blacklist",
-      input: { user_did: userDid },
-    });
-  }
+  const fraudResult = await agent.client.executeAndDecode({
+    script_name: consortium.scriptName,
+    script_version: consortium.scriptVersion,
+    function_name: "check-blacklist",
+    input: { user_did: userDid },
+  }) as { is_flagged: boolean; risk_level: string; checked_at: string; consortium_id: string };
 
   emitInspectorEvent({
     type: "agent_received",
@@ -96,10 +108,10 @@ export async function runAgentWorkflow(
   emitInspectorEvent({
     type: "tee_simulated",
     step: 2,
-    title: "Inside Consortium Enclave (Simulated View)",
+    title: "Inside Consortium Enclave",
     content: fraudResult.is_flagged
-      ? `Looking up ${userDid} in fraud_blacklist KV map...\nResult: ⚠️ MATCH FOUND\nBlacklist contains 2 entries — this user IS flagged.\nReturning risk signal: CRITICAL.`
-      : `Looking up ${userDid} in fraud_blacklist KV map...\nResult: NOT FOUND ✓\nBlacklist contains 2 entries — none match this user.\nReturning risk signal only (no blacklist data exposed).`,
+      ? `📍 TEE Node: Intel TDX Secure Enclave\n\nLooking up ${userDid} in fraud_blacklist KV map...\n⚠️ MATCH FOUND\nReturning risk signal: ${fraudResult.risk_level}\n\nBlacklist REASON is never exposed — only the boolean flag.`
+      : `📍 TEE Node: Intel TDX Secure Enclave\n\nLooking up ${userDid} in fraud_blacklist KV map...\nResult: NOT FOUND ✓\nBlacklist contains entries — none match this user.\nReturning risk signal only (no blacklist data exposed).`,
     highlight: "gray",
   });
 
@@ -110,68 +122,48 @@ export async function runAgentWorkflow(
       title: "Application Rejected — Fraud Blacklist",
       content: "User flagged in industry fraud blacklist. Application terminated.\nThis demonstrates cross-tenant data sharing WITHOUT revealing WHY the user was flagged.",
     });
+
+    // Cleanup: remove Bob from blacklist after demo
+    if (isFlagged) {
+      await removeFraudBlacklist(consortium.auth, userDid);
+    }
+
     return {
       step: "fraud_check_failed",
       fraudCheck: fraudResult,
-      eligibility: { score: 0, tier: "rejected", maxLoanAmount: 0 },
+      eligibility: { score: 0, tier: "rejected", max_loan_amount: 0 },
       offers: [],
     };
   }
 
-  // ===== STEP 2b: Credit Assessment =====
-  let eligibility: any;
+  // ===== STEP 2b: Credit Assessment (REAL TEE) =====
+  emitInspectorEvent({
+    type: "agent_action",
+    step: 2,
+    title: "Credit Assessment (Real TEE Execution)",
+    content: `Calling PrivaLend contract...\nexecuteAndDecode("${privalend.scriptName}", "assess-eligibility")\nInput: { fraud_result: ${JSON.stringify(fraudResult)}, loan_amount: ${loanRequest.amount} }\n\n🔐 TEE reads user profile from KV store — Agent CANNOT access this data.`,
+  });
 
-  if (customProfile) {
-    const cp = customProfile.eligibility;
-    emitInspectorEvent({
-      type: "agent_action",
-      step: 2,
-      title: "Credit Assessment (Custom Profile)",
-      content: `Calling PrivaLend contract...\nexecuteAndDecode("${privalend.scriptName}", "assess-eligibility")\nInput: { fraud_result: ${JSON.stringify(fraudResult)}, loan_amount: ${loanRequest.amount} }\n\n🔐 User's financial data resolved inside TEE — Agent cannot read it.`,
-    });
+  const eligibility = await agent.client.executeAndDecode({
+    script_name: privalend.scriptName,
+    script_version: privalend.scriptVersion,
+    function_name: "assess-eligibility",
+    input: {
+      fraud_result: fraudResult,
+      loan_amount: loanRequest.amount,
+      term_months: loanRequest.termMonths,
+    },
+  }) as { score: number; tier: string; max_loan_amount: number; debt_to_income_ratio: number; approved: boolean };
 
-    eligibility = {
-      score: cp.score,
-      tier: cp.tier,
-      max_loan_amount: cp.max_loan_amount,
-      debt_to_income_ratio: cp.debt_to_income_ratio,
-      approved: cp.approved,
-    };
-
-    emitInspectorEvent({
-      type: "tee_simulated",
-      step: 2,
-      title: "Inside PrivaLend Enclave (Custom Profile)",
-      content: `Fetching user financial profile from T3N KV store...\n  → Annual Income: $${customProfile.profile.annual_income.toLocaleString()}\n  → Total Debt: $${customProfile.profile.total_debt.toLocaleString()}\n  → Nationality: ${customProfile.profile.nationality}\n  → Debt-to-Income Ratio: ${(cp.debt_to_income_ratio * 100).toFixed(1)}%\nComputing credit score... Result: ${cp.score}\nTier: ${cp.tier.toUpperCase()}\nMax Loan Amount: $${cp.max_loan_amount.toLocaleString()}\n⚠️ Raw financial data destroyed in enclave memory.`,
-      highlight: "gray",
-    });
-  } else {
-    emitInspectorEvent({
-      type: "agent_action",
-      step: 2,
-      title: "Credit Assessment",
-      content: `Calling PrivaLend contract...\nexecuteAndDecode("${privalend.scriptName}", "assess-eligibility")\nInput: { fraud_result: ${JSON.stringify(fraudResult)}, loan_amount: ${loanRequest.amount} }`,
-    });
-
-    eligibility = await agent.client.executeAndDecode({
-      script_name: privalend.scriptName,
-      script_version: privalend.scriptVersion,
-      function_name: "assess-eligibility",
-      input: {
-        fraud_result: fraudResult,
-        loan_amount: loanRequest.amount,
-        term_months: loanRequest.termMonths,
-      },
-    });
-
-    emitInspectorEvent({
-      type: "tee_simulated",
-      step: 2,
-      title: "Inside PrivaLend Enclave (Simulated View)",
-      content: `Fetching user financial profile from T3N KV store...\n  → Annual Income: $85,000\n  → Total Debt: $12,000\n  → Employment: Full-time (3 years)\n  → Debt-to-Income Ratio: 14.1%\nComputing credit score... Result: 780\nTier: PRIME\nMax Loan Amount: $150,000\n⚠️ Raw financial data destroyed in enclave memory.`,
-      highlight: "gray",
-    });
-  }
+  emitInspectorEvent({
+    type: "tee_simulated",
+    step: 2,
+    title: "Inside PrivaLend Enclave (Real Computation)",
+    content: profileInput
+      ? `📍 TEE Node: Intel TDX Secure Enclave\n\nReading user_financial_profile from KV store...\n  → Annual Income: $${profileInput.annual_income.toLocaleString()}\n  → Total Debt: $${profileInput.total_debt.toLocaleString()}\n  → Nationality: ${profileInput.nationality}\n\nComputing credit score...\n  Score: ${eligibility.score}\n  Tier: ${eligibility.tier?.toUpperCase()}\n  Max Loan: $${eligibility.max_loan_amount?.toLocaleString()}\n\n⚠️ Raw financial data stays inside enclave. Agent sees only the output above.`
+      : `📍 TEE Node: Intel TDX Secure Enclave\n\nReading user_financial_profile from KV store...\n  (Demo fallback profile loaded)\n\nComputing credit score...\n  Score: ${eligibility.score}\n  Tier: ${eligibility.tier?.toUpperCase()}\n  Max Loan: $${eligibility.max_loan_amount?.toLocaleString()}\n\n⚠️ Raw financial data destroyed in enclave memory.`,
+    highlight: "gray",
+  });
 
   emitInspectorEvent({
     type: "agent_received",
@@ -181,46 +173,26 @@ export async function runAgentWorkflow(
     highlight: "green",
   });
 
-  // ===== STEP 3: Fetch Loan Offers =====
+  // ===== STEP 3: Fetch Loan Offers (REAL TEE → Mock Bank) =====
   emitInspectorEvent({
     type: "agent_action",
     step: 3,
-    title: "Fetching Loan Offers",
-    content: `Calling PrivaLend contract "fetch-offers"\nInput: { tier: "${eligibility.tier}", score: ${eligibility.score}, amount: ${loanRequest.amount}, term: ${loanRequest.termMonths} }\nUsing http::call to query lender APIs (no PII sent)`,
+    title: "Fetching Loan Offers (TEE → Dynamic Pricing)",
+    content: `Calling PrivaLend contract "fetch-offers"\nInput: { tier: "${eligibility.tier}", credit_score: ${eligibility.score}, amount: ${loanRequest.amount}, term: ${loanRequest.termMonths} }\nTEE uses http::call to query lender APIs (no PII sent)\n\n📊 Dynamic Rate = 4.0% + (850 - ${eligibility.score}) × 0.02%`,
   });
 
-  let offersResult: any;
-  if (customProfile) {
-    // Call mock bank directly with credit_score for dynamic pricing
-    try {
-      const bankRes = await fetch(`${config.mockBank.baseUrl}/api/offers`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          tier: eligibility.tier,
-          credit_score: eligibility.score,
-          requested_amount: loanRequest.amount,
-          term_months: loanRequest.termMonths,
-          purpose: loanRequest.purpose,
-        }),
-      });
-      offersResult = await bankRes.json();
-    } catch {
-      offersResult = { offers: [] };
-    }
-  } else {
-    offersResult = await agent.client.executeAndDecode({
-      script_name: privalend.scriptName,
-      script_version: privalend.scriptVersion,
-      function_name: "fetch-offers",
-      input: {
-        tier: eligibility.tier,
-        amount: loanRequest.amount,
-        term_months: loanRequest.termMonths,
-        purpose: loanRequest.purpose,
-      },
-    });
-  }
+  const offersResult = await agent.client.executeAndDecode({
+    script_name: privalend.scriptName,
+    script_version: privalend.scriptVersion,
+    function_name: "fetch-offers",
+    input: {
+      tier: eligibility.tier,
+      amount: loanRequest.amount,
+      term_months: loanRequest.termMonths,
+      purpose: loanRequest.purpose,
+      credit_score: eligibility.score,
+    },
+  }) as { offers: LoanOffer[]; total_found: number };
 
   emitInspectorEvent({
     type: "agent_received",
@@ -242,7 +214,6 @@ export async function runAgentWorkflow(
     const selectedOffer = offersResult.offers.find((o: LoanOffer) => o.id === selectedOfferId);
     if (!selectedOffer) throw new Error(`Offer ${selectedOfferId} not found`);
 
-    // Show placeholder payload BEFORE submission
     const placeholderPayload = {
       offer_id: selectedOfferId,
       loan_amount: loanRequest.amount,
@@ -256,7 +227,7 @@ export async function runAgentWorkflow(
     emitInspectorEvent({
       type: "placeholder_before",
       step: 3,
-      title: "Agent Sends (with Placeholders)",
+      title: "Agent Sends (with Placeholders — PII hidden)",
       content: JSON.stringify(placeholderPayload, null, 2),
       highlight: "red",
     });
@@ -273,7 +244,7 @@ export async function runAgentWorkflow(
       },
     });
 
-    // Fetch what the mock bank actually received
+    // Show what the bank actually received (with resolved PII)
     try {
       const bankResponse = await fetch(`${config.mockBank.baseUrl}/last-received`);
       const bankPayload = await bankResponse.json();
@@ -290,22 +261,26 @@ export async function runAgentWorkflow(
         type: "placeholder_after",
         step: 3,
         title: "T3N Node Resolved Placeholders",
-        content: `Placeholders resolved inside TEE:\n  {{profile.first_name}} → "Alan"\n  {{profile.last_name}} → "Turing"\n  {{profile.id_number}} → "S1234567A"\n  {{profile.date_of_birth}} → "1912-06-23"`,
+        content: `Placeholders resolved inside TEE:\n  {{profile.first_name}} → resolved\n  {{profile.last_name}} → resolved\n  {{profile.id_number}} → resolved\n  {{profile.date_of_birth}} → resolved\n\nBank received real PII. Agent never saw it.`,
         highlight: "green",
       });
     }
 
-    // Audit log
     emitInspectorEvent({
       type: "audit_log",
       step: 4,
       title: "Immutable Audit Trail",
-      content: `[${new Date().toISOString()}] Loan application submitted\n  Agent DID: ${agent.did}\n  User DID: ${userDid}\n  Lender: ${selectedOffer.lender}\n  Amount: $${loanRequest.amount}\n  PII exposure to Agent: 0 bytes\n  Cross-tenant fraud check: PASSED\n  All operations logged to T3N Merkle ledger.`,
+      content: `[${new Date().toISOString()}] Loan application submitted\n  Agent DID: ${agent.did}\n  User DID: ${userDid}\n  Lender: ${selectedOffer.lender}\n  Amount: $${loanRequest.amount}\n  PII exposure to Agent: 0 bytes\n  Cross-tenant fraud check: PASSED\n  TEE-computed credit score: ${eligibility.score}\n  All operations logged to T3N Merkle ledger.`,
       highlight: "blue",
     });
 
     result.step = "application_submitted";
     result.applicationResult = applicationResult as { status: string; reference: string; lender: string };
+  }
+
+  // Cleanup: remove Bob from blacklist after successful non-flagged flow (shouldn't happen, but safe)
+  if (isFlagged) {
+    await removeFraudBlacklist(consortium.auth, userDid);
   }
 
   return result;

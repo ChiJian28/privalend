@@ -25,7 +25,7 @@ export async function setupPrivaLendTenant(): Promise<TenantDeployment> {
   console.log(`[Setup] PrivaLend tenant DID: ${auth.did}`);
 
   const CONTRACT_TAIL = "privalend";
-  const CONTRACT_VERSION = "0.1.0";
+  const CONTRACT_VERSION = "0.2.0";
   const WASM_PATH = resolve(import.meta.dirname, "../../contracts/privalend/target/wasm32-wasip2/release/z_privalend.wasm");
 
   const tenantId = auth.did.slice("did:t3n:".length);
