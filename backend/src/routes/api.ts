@@ -196,7 +196,14 @@ export function createApiRouter(
 
       res.json({ success: true, result });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      const requestId = error.message?.match(/\[([0-9a-f-]{36})\]/i)?.[1];
+      res.status(500).json({
+        error: error.message,
+        request_id: requestId ?? null,
+        hint: requestId
+          ? "T3N testnet TEE internal_error — not a local config issue. Report request_id to devrel@terminal3.io"
+          : undefined,
+      });
     }
   });
 
@@ -226,6 +233,56 @@ export function createApiRouter(
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
+  });
+
+  /**
+   * GET /api/tee-health
+   * Probes T3N testnet TEE contract execution (diagnostic)
+   */
+  router.get("/tee-health", async (_req, res) => {
+    if (!consortium) {
+      return res.status(503).json({ tee: "unavailable", reason: "consortium not deployed" });
+    }
+
+    const checks: Record<string, unknown> = {
+      node: "https://cn-api.sg.testnet.t3n.terminal3.io",
+      tenant_status: "unknown",
+      tee_execute: "unknown",
+      tee_logs: "unknown",
+    };
+
+    try {
+      const me = await consortium.auth.tenantClient.tenant.me() as { status?: string; quotas?: { log_max_entries?: number } };
+      checks.tenant_status = me.status ?? "ok";
+      checks.log_max_entries = me.quotas?.log_max_entries ?? 0;
+    } catch (e: any) {
+      checks.tenant_status = `error: ${e.message}`;
+    }
+
+    try {
+      await consortium.auth.tenantClient.contracts.execute("fraud-check", {
+        version: "0.1.0",
+        functionName: "check-blacklist",
+        input: { user_did: "did:t3n:health_probe" },
+      });
+      checks.tee_execute = "ok";
+    } catch (e: any) {
+      const match = e.message?.match(/\[([0-9a-f-]{36})\]/i);
+      checks.tee_execute = "failed";
+      checks.tee_error = e.message;
+      checks.request_id = match?.[1] ?? null;
+      checks.hint = "T3N testnet TEE execution returning internal_error — report request_id to devrel@terminal3.io";
+    }
+
+    try {
+      const logs = await consortium.auth.tenantClient.contracts.logs("fraud-check", { sinceSeq: 0, limit: 5 });
+      checks.tee_logs = logs.entries.length > 0 ? `${logs.entries.length} entries` : "empty (no successful runs yet)";
+    } catch (e: any) {
+      checks.tee_logs = `error: ${e.message}`;
+    }
+
+    const healthy = checks.tee_execute === "ok";
+    res.status(healthy ? 200 : 503).json({ tee: healthy ? "healthy" : "degraded", checks });
   });
 
   /**

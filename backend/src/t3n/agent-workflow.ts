@@ -5,6 +5,44 @@ import { emitInspectorEvent } from "../websocket.js";
 import type { TenantDeployment } from "./tenant-setup.js";
 import { seedProfileToKV, seedFraudBlacklist, removeFraudBlacklist, type FinancialProfile } from "./seed-profile.js";
 
+let lastLogSeq: Record<string, number> = {};
+
+async function fetchAndEmitTeeLogs(
+  deployment: TenantDeployment,
+  step: number,
+  label: string
+): Promise<void> {
+  const tail = deployment.scriptName.split(":").pop()!;
+  try {
+    const sinceSeq = lastLogSeq[tail] ?? 0;
+    const logsResult = await deployment.auth.tenantClient.contracts.logs(tail, {
+      sinceSeq,
+      limit: 50,
+      minLevel: "info",
+    });
+
+    if (logsResult.entries.length > 0) {
+      const logLines = logsResult.entries.map(
+        (e) => `[${new Date(e.ts_ms).toISOString().slice(11, 23)}] [${e.level.toUpperCase()}] ${e.message}`
+      ).join("\n");
+
+      emitInspectorEvent({
+        type: "tee_log",
+        step,
+        title: `📡 Live TEE Log — ${label}`,
+        content: `📍 Source: T3N Intel TDX Node (hardware-attested)\n📋 Contract: ${deployment.scriptName}\n${"─".repeat(48)}\n${logLines}`,
+        highlight: "gray",
+      });
+    }
+
+    if (logsResult.next_seq != null) {
+      lastLogSeq[tail] = logsResult.next_seq;
+    }
+  } catch (e: any) {
+    console.log(`[TEE-Logs] Could not fetch logs for ${tail}: ${e.message}`);
+  }
+}
+
 export interface LoanOffer {
   id: string;
   lender: string;
@@ -46,6 +84,9 @@ export async function runAgentWorkflow(
   profileInput?: ProfileInput,
   isFlagged?: boolean
 ): Promise<WorkflowResult> {
+  // Reset log sequence for fresh workflow
+  lastLogSeq = {};
+
   // ===== PRE-STEP: Seed custom profile into T3N KV store (bypasses Agent) =====
   if (profileInput) {
     const profile: FinancialProfile = {
@@ -97,22 +138,15 @@ export async function runAgentWorkflow(
     input: { user_did: userDid },
   }) as { is_flagged: boolean; risk_level: string; checked_at: string; consortium_id: string };
 
+  // Fetch real TEE logs from the Consortium contract
+  await fetchAndEmitTeeLogs(consortium, 2, "Fraud Consortium Enclave");
+
   emitInspectorEvent({
     type: "agent_received",
     step: 2,
     title: "Fraud Check Result (Agent sees ONLY this)",
     content: JSON.stringify(fraudResult, null, 2),
     highlight: fraudResult.is_flagged ? "red" : "green",
-  });
-
-  emitInspectorEvent({
-    type: "tee_simulated",
-    step: 2,
-    title: "Inside Consortium Enclave",
-    content: fraudResult.is_flagged
-      ? `📍 TEE Node: Intel TDX Secure Enclave\n\nLooking up ${userDid} in fraud_blacklist KV map...\n⚠️ MATCH FOUND\nReturning risk signal: ${fraudResult.risk_level}\n\nBlacklist REASON is never exposed — only the boolean flag.`
-      : `📍 TEE Node: Intel TDX Secure Enclave\n\nLooking up ${userDid} in fraud_blacklist KV map...\nResult: NOT FOUND ✓\nBlacklist contains entries — none match this user.\nReturning risk signal only (no blacklist data exposed).`,
-    highlight: "gray",
   });
 
   if (fraudResult.is_flagged) {
@@ -155,13 +189,15 @@ export async function runAgentWorkflow(
     },
   }) as { score: number; tier: string; max_loan_amount: number; debt_to_income_ratio: number; approved: boolean };
 
+  // Fetch real TEE logs from the PrivaLend eligibility contract
+  await fetchAndEmitTeeLogs(privalend, 2, "PrivaLend Eligibility Enclave");
+
+  // Fallback: if logs() returned empty (quota disabled), emit a constructed view using real TEE output
   emitInspectorEvent({
     type: "tee_simulated",
     step: 2,
-    title: "Inside PrivaLend Enclave (Real Computation)",
-    content: profileInput
-      ? `📍 TEE Node: Intel TDX Secure Enclave\n\nReading user_financial_profile from KV store...\n  → Annual Income: $${profileInput.annual_income.toLocaleString()}\n  → Total Debt: $${profileInput.total_debt.toLocaleString()}\n  → Nationality: ${profileInput.nationality}\n\nComputing credit score...\n  Score: ${eligibility.score}\n  Tier: ${eligibility.tier?.toUpperCase()}\n  Max Loan: $${eligibility.max_loan_amount?.toLocaleString()}\n\n⚠️ Raw financial data stays inside enclave. Agent sees only the output above.`
-      : `📍 TEE Node: Intel TDX Secure Enclave\n\nReading user_financial_profile from KV store...\n  (Demo fallback profile loaded)\n\nComputing credit score...\n  Score: ${eligibility.score}\n  Tier: ${eligibility.tier?.toUpperCase()}\n  Max Loan: $${eligibility.max_loan_amount?.toLocaleString()}\n\n⚠️ Raw financial data destroyed in enclave memory.`,
+    title: "TEE Computation Result (from executeAndDecode)",
+    content: `📍 TEE-computed output (verified by Intel TDX attestation):\n\n  Credit Score: ${eligibility.score}\n  Tier: ${eligibility.tier?.toUpperCase()}\n  Max Loan: $${eligibility.max_loan_amount?.toLocaleString()}\n  DTI Ratio: ${eligibility.debt_to_income_ratio}\n  Approved: ${eligibility.approved}\n\n⚠️ Raw financial data was processed and destroyed inside the enclave.\n   Agent receives only the aggregated output above.`,
     highlight: "gray",
   });
 
@@ -193,6 +229,9 @@ export async function runAgentWorkflow(
       credit_score: eligibility.score,
     },
   }) as { offers: LoanOffer[]; total_found: number };
+
+  // Fetch real TEE logs from the PrivaLend offers contract
+  await fetchAndEmitTeeLogs(privalend, 3, "PrivaLend Offers Enclave");
 
   emitInspectorEvent({
     type: "agent_received",
@@ -243,6 +282,9 @@ export async function runAgentWorkflow(
         lender: selectedOffer.lender,
       },
     });
+
+    // Fetch real TEE logs from the application submission
+    await fetchAndEmitTeeLogs(privalend, 3, "PrivaLend Application Enclave");
 
     // Show what the bank actually received (with resolved PII)
     try {

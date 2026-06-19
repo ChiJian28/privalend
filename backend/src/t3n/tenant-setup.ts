@@ -9,7 +9,31 @@ export interface TenantDeployment {
   auth: AuthenticatedClient;
   contractId: number;
   scriptName: string;
-  scriptVersion: number;
+  scriptVersion: string;
+}
+
+/** Known contract IDs per version (updated when re-deploying WASM). */
+const KNOWN_CONTRACT_IDS: Record<string, Record<string, number>> = {
+  privalend: { "0.2.0": 189, "0.1.0": 182 },
+  "fraud-check": { "0.1.0": 183 },
+};
+
+async function ensureContractMapAccess(
+  auth: AuthenticatedClient,
+  contractId: number,
+  mapTails: string[]
+): Promise<void> {
+  for (const tail of mapTails) {
+    try {
+      await auth.tenantClient.maps.update(tail, {
+        writers: { only: [contractId] },
+        readers: { only: [contractId] },
+      });
+      console.log(`[Setup] Updated ${tail} map ACL for contract #${contractId}`);
+    } catch (e: any) {
+      console.log(`[Setup] Could not update ${tail} ACL: ${e.message}`);
+    }
+  }
 }
 
 /**
@@ -46,7 +70,8 @@ export async function setupPrivaLendTenant(): Promise<TenantDeployment> {
   } catch (e: any) {
     if (e.message?.includes("is not higher than current version")) {
       console.log(`[Setup] Contract already deployed at ${scriptName} — connecting to existing`);
-      contractId = 182; // Known from previous deployment
+      contractId = KNOWN_CONTRACT_IDS[CONTRACT_TAIL]?.[CONTRACT_VERSION] ?? 189;
+      console.log(`[Setup] Using known contract id #${contractId} for ${CONTRACT_VERSION}`);
     } else {
       throw e;
     }
@@ -81,6 +106,9 @@ export async function setupPrivaLendTenant(): Promise<TenantDeployment> {
       console.log("[Setup] Eligibility-cache map already exists (idempotent)");
     } else throw e;
   }
+
+  // Ensure the active contract can read/write KV maps (needed after version bumps)
+  await ensureContractMapAccess(auth, contractId, ["secrets", "eligibility-cache"]);
 
   // Seed mock lender API key
   await auth.tenantClient.executeControl("map-entry-set", {
@@ -127,7 +155,8 @@ export async function setupConsortiumTenant(): Promise<TenantDeployment> {
   } catch (e: any) {
     if (e.message?.includes("is not higher than current version")) {
       console.log(`[Setup] Contract already deployed at ${scriptName} — connecting to existing`);
-      contractId = 183; // Known from previous deployment
+      contractId = KNOWN_CONTRACT_IDS[CONTRACT_TAIL]?.[CONTRACT_VERSION] ?? 183;
+      console.log(`[Setup] Using known contract id #${contractId} for ${CONTRACT_VERSION}`);
     } else {
       throw e;
     }
@@ -147,6 +176,8 @@ export async function setupConsortiumTenant(): Promise<TenantDeployment> {
       console.log("[Setup] fraud_blacklist map already exists (idempotent)");
     } else throw e;
   }
+
+  await ensureContractMapAccess(auth, contractId, ["fraud_blacklist"]);
 
   // Seed sample blacklist entries (for demo)
   const blacklistedDids = [

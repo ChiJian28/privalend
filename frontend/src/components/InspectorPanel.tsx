@@ -17,7 +17,7 @@ export function InspectorPanel({ events, currentStep }: Props) {
     (e) => e.type === "agent_action" || e.type === "agent_received" || e.type === "system" || e.type === "placeholder_before" || e.type === "audit_log" || e.type === "error"
   );
   const teeEvents = events.filter(
-    (e) => e.type === "tee_simulated" || e.type === "cross_tenant" || e.type === "placeholder_after"
+    (e) => e.type === "tee_simulated" || e.type === "tee_log" || e.type === "cross_tenant" || e.type === "placeholder_after"
   );
 
   useEffect(() => {
@@ -147,8 +147,10 @@ function AgentEventCard({ event }: { event: InspectorEvent }) {
 }
 
 function TeeEventCard({ event }: { event: InspectorEvent }) {
+  const isLiveLog = event.type === "tee_log";
   return (
     <div className={`rounded px-2 py-1.5 border-l-2 ${
+      isLiveLog ? "border-cyan-400 bg-cyan-950/20 ring-1 ring-cyan-800/30" :
       event.type === "placeholder_after" ? "border-green-500 bg-green-950/20" :
       event.type === "cross_tenant" ? "border-yellow-500 bg-yellow-950/10" :
       "border-blue-600 bg-blue-950/20"
@@ -156,14 +158,21 @@ function TeeEventCard({ event }: { event: InspectorEvent }) {
       <div className="flex items-center gap-1.5 mb-0.5">
         <span className="text-[10px]">{getTeeIcon(event)}</span>
         <span className={`text-[10px] font-semibold ${
+          isLiveLog ? "text-cyan-300" :
           event.type === "placeholder_after" ? "text-green-400" :
           event.type === "cross_tenant" ? "text-yellow-400" :
           "text-blue-400"
         }`}>
           {event.title}
         </span>
+        {isLiveLog && (
+          <span className="ml-auto px-1.5 py-0.5 rounded text-[8px] font-bold bg-cyan-900/60 text-cyan-300 border border-cyan-700/40 tracking-wider">
+            LIVE FROM TEE
+          </span>
+        )}
       </div>
-      <TypewriterText content={event.content} className={`text-[10px] whitespace-pre-wrap break-words leading-relaxed ${
+      <TypewriterText content={event.content} className={`text-[10px] whitespace-pre-wrap break-words leading-relaxed font-mono ${
+        isLiveLog ? "text-cyan-200/90" :
         event.type === "placeholder_after" ? "text-green-300/90" : "text-emerald-300/80"
       }`} />
     </div>
@@ -223,6 +232,7 @@ function getAgentIcon(event: InspectorEvent): string {
 }
 
 function getTeeIcon(event: InspectorEvent): string {
+  if (event.type === "tee_log") return "📡";
   if (event.type === "cross_tenant") return "🔗";
   if (event.type === "placeholder_after") return "✅";
   return "🔐";

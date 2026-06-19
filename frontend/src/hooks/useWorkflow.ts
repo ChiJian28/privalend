@@ -7,7 +7,7 @@ export type WorkflowStep = 0 | 1 | 2 | 3 | 4;
 
 export interface InspectorEvent {
   id: string;
-  type: "system" | "agent_action" | "agent_received" | "tee_simulated" | "placeholder_before" | "placeholder_after" | "cross_tenant" | "audit_log" | "error";
+  type: "system" | "agent_action" | "agent_received" | "tee_simulated" | "tee_log" | "placeholder_before" | "placeholder_after" | "cross_tenant" | "audit_log" | "error";
   step: number;
   title: string;
   content: string;

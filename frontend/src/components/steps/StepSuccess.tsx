@@ -5,9 +5,10 @@ import { AuditTrailButton } from "../AuditTrail";
 
 interface Props {
   result: { status: string; reference: string; lender: string } | null;
+  eligibility?: { score: number; tier: string; max_loan_amount: number; approved: boolean } | null;
 }
 
-export function StepSuccess({ result }: Props) {
+export function StepSuccess({ result, eligibility }: Props) {
   if (!result) return null;
 
   return (
@@ -77,6 +78,8 @@ export function StepSuccess({ result }: Props) {
         lender: result.lender,
         amount: 50000,
         term: 36,
+        creditScore: eligibility?.score,
+        tier: eligibility?.tier,
       }} />
 
       <p className="text-[10px] text-slate-400 mt-6">

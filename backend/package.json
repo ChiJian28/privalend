@@ -9,7 +9,9 @@
     "start": "node dist/index.js",
     "setup:tenants": "tsx src/scripts/setup-tenants.ts",
     "setup:contracts": "tsx src/scripts/deploy-contracts.ts",
-    "demo": "tsx src/scripts/run-demo.ts"
+    "demo": "tsx src/scripts/run-demo.ts",
+    "test:tee": "tsx src/scripts/test-tee-flow.ts",
+    "debug:tee": "tsx src/scripts/debug-tee-500.ts"
   },
   "dependencies": {
     "@terminal3/t3n-sdk": "latest",

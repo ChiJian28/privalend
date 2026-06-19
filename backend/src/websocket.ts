@@ -6,6 +6,7 @@ export type InspectorEventType =
   | "agent_action"
   | "agent_received"
   | "tee_simulated"
+  | "tee_log"
   | "placeholder_before"
   | "placeholder_after"
   | "cross_tenant"
@@ -55,6 +56,7 @@ function getPrefix(type: InspectorEventType): string {
     case "agent_action": return "🤖";
     case "agent_received": return "📥";
     case "tee_simulated": return "🔒";
+    case "tee_log": return "📡";
     case "placeholder_before": return "📤";
     case "placeholder_after": return "✅";
     case "cross_tenant": return "🔗";
