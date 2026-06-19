@@ -1,0 +1,12 @@
+# Node
+node_modules/
+
+# Environment
+.env
+.env.local
+
+hackathon/
+terminal3/
+
+memory.txt
+.DS_Store

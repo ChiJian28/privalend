@@ -1,6 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
+import { AuditTrailButton } from "../AuditTrail";
 
 interface Props {
   result: { status: string; reference: string; lender: string } | null;
@@ -11,7 +12,7 @@ export function StepSuccess({ result }: Props) {
 
   return (
     <div className="max-w-md mx-auto pt-8 text-center">
-      {/* Confetti-like animation */}
+      {/* Success animation */}
       <motion.div
         initial={{ scale: 0, rotate: -180 }}
         animate={{ scale: 1, rotate: 0 }}
@@ -50,7 +51,6 @@ export function StepSuccess({ result }: Props) {
         <div className="space-y-2">
           <DetailRow label="Lender" value={result.lender} />
           <DetailRow label="Amount" value="$50,000" />
-          <DetailRow label="Rate" value="4.30% APR" />
           <DetailRow label="Term" value="36 months" />
         </div>
       </motion.div>
@@ -70,6 +70,14 @@ export function StepSuccess({ result }: Props) {
           <PrivacyStat label="Audit Trail" value="Merkle-sealed" good />
         </div>
       </motion.div>
+
+      {/* Cryptographic Audit Trail Button */}
+      <AuditTrailButton data={{
+        reference: result.reference,
+        lender: result.lender,
+        amount: 50000,
+        term: 36,
+      }} />
 
       <p className="text-[10px] text-slate-400 mt-6">
         The entire application was processed without the AI agent ever accessing your name, ID number, or financial data.
