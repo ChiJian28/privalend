@@ -1,4 +1,4 @@
-use crate::host::interfaces::{kv_store, logging};
+use crate::host::interfaces::kv_store;
 use crate::host::tenant::tenant_context;
 use serde::{Deserialize, Serialize};
 
@@ -26,8 +26,6 @@ pub fn check_blacklist(input: &[u8]) -> Result<Vec<u8>, String> {
     let req: BlacklistInput = serde_json::from_slice(input)
         .map_err(|e| format!("parse input: {e}"))?;
 
-    let _ = logging::info(&format!("Checking blacklist for DID: {}", req.user_did));
-
     let tid = tenant_context::tenant_did();
     let map_name = format!("z:{}:fraud_blacklist", hex::encode(&tid));
 
@@ -40,15 +38,9 @@ pub fn check_blacklist(input: &[u8]) -> Result<Vec<u8>, String> {
             let entry: BlacklistEntry = serde_json::from_slice(&entry_bytes)
                 .map_err(|e| format!("parse entry: {e}"))?;
 
-            let _ = logging::info(&format!(
-                "MATCH FOUND — reason: {}, reported: {}",
-                entry.reason, entry.reported_at
-            ));
-
             (entry.flagged, "high".to_string())
         }
         None => {
-            let _ = logging::info("No match found in blacklist — user is clean");
             (false, "low".to_string())
         }
     };
@@ -59,8 +51,6 @@ pub fn check_blacklist(input: &[u8]) -> Result<Vec<u8>, String> {
         checked_at: "2026-06-18T00:00:00Z".to_string(),
         consortium_id: format!("did:t3n:{}", hex::encode(&tid)),
     };
-
-    let _ = logging::info("Returning risk signal only — blacklist data stays in consortium enclave");
 
     serde_json::to_vec(&output).map_err(|e| e.to_string())
 }

@@ -3,7 +3,7 @@ import { emitInspectorEvent } from "../websocket.js";
 import type { TenantDeployment } from "./tenant-setup.js";
 import type { createAgentClient } from "./client.js";
 
-export const PRIVALEND_ISSUER_DID = "did:t3n:6ec1a64ea7733c6b8e87327db829dfae0648a197";
+export const PRIVALEND_ISSUER_DID = "did:t3n:8b5e0d443d68570f4800da31e46d1581d603b8db";
 
 export interface CreditCredentialProof {
   type: string;
@@ -122,7 +122,7 @@ export function buildDemoCredential(input: CreditCredentialInput): CreditCredent
   };
 }
 
-/** VC issuance requires privalend v0.2.1+ (issue-credit-credential). Set after deploy. */
+/** VC issuance uses privalend v0.2.1+ (issue-credit-credential, no logging host). */
 export const VC_CONTRACT_VERSION = "0.2.1";
 
 async function tryTeeIssueCredential(

@@ -1,4 +1,4 @@
-use crate::host::interfaces::{http as http_iface, kv_store, logging};
+use crate::host::interfaces::kv_store;
 use crate::host::tenant::tenant_context;
 use serde::{Deserialize, Serialize};
 
@@ -34,49 +34,16 @@ pub fn fetch_offers(input: &[u8]) -> Result<Vec<u8>, String> {
     let req: OffersInput = serde_json::from_slice(input)
         .map_err(|e| format!("parse input: {e}"))?;
 
-    let _ = logging::info(&format!(
-        "Fetching offers for tier={}, amount=${}, term={}mo",
-        req.tier, req.amount, req.term_months
-    ));
-
-    // Read lender API key from secrets
+    // Verify secrets map is reachable inside TEE (demo lender key).
     let tid = tenant_context::tenant_did();
     let secrets_map = format!("z:{}:secrets", hex::encode(&tid));
     let _api_key = kv_store::get(&secrets_map, b"lender_api_key")
         .map_err(|e| format!("kv read: {e}"))?
         .ok_or("lender_api_key not found in secrets")?;
 
-    // Call mock bank API to get offers (no PII in this request)
-    let mut request_body = serde_json::json!({
-        "tier": req.tier,
-        "requested_amount": req.amount,
-        "term_months": req.term_months,
-        "purpose": req.purpose,
-    });
-    if let Some(score) = req.credit_score {
-        request_body["credit_score"] = serde_json::json!(score);
-    }
-
-    let resp = http_iface::call(&http_iface::Request {
-        method: http_iface::Verb::Post,
-        url: "http://localhost:4000/api/offers".to_string(),
-        headers: Some(vec![
-            ("Content-Type".to_string(), "application/json".to_string()),
-            ("Authorization".to_string(), "Bearer mock_lender_key_12345".to_string()),
-        ]),
-        payload: Some(serde_json::to_vec(&request_body).map_err(|e| e.to_string())?),
-    })
-    .map_err(|e| format!("lender API call failed: {e}"))?;
-
-    if resp.code == 200 {
-        let _ = logging::info("Successfully retrieved offers from lender API");
-        Ok(resp.payload)
-    } else {
-        // Fallback: generate offers based on tier (for demo resilience)
-        let _ = logging::info("Lender API unavailable, generating demo offers");
-        let offers = generate_demo_offers(&req);
-        serde_json::to_vec(&offers).map_err(|e| e.to_string())
-    }
+    // T3N testnet http host currently returns internal_error — use in-enclave demo offers.
+    let offers = generate_demo_offers(&req);
+    serde_json::to_vec(&offers).map_err(|e| e.to_string())
 }
 
 fn generate_demo_offers(req: &OffersInput) -> OffersOutput {

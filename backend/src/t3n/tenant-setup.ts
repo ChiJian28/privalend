@@ -12,11 +12,36 @@ export interface TenantDeployment {
   scriptVersion: string;
 }
 
-/** Known contract IDs per version (updated when re-deploying WASM). */
-const KNOWN_CONTRACT_IDS: Record<string, Record<string, number>> = {
-  privalend: { "0.2.0": 189, "0.1.0": 182 },
-  "fraud-check": { "0.1.0": 183 },
+/** Fallback contract IDs keyed by `<tenantHex>:<tail>:<version>`. Update after deploy. */
+const KNOWN_CONTRACT_IDS: Record<string, number> = {
+  "8b5e0d443d68570f4800da31e46d1581d603b8db:privalend:0.2.1": 274,
+  "8b5e0d443d68570f4800da31e46d1581d603b8db:privalend:0.2.2": 276,
+  "377025df4be81d8222dd63ecf63a8b351bb109f2:fraud-check:0.1.1": 275,
 };
+
+function contractLookupKey(tenantId: string, tail: string, version: string): string {
+  return `${tenantId}:${tail}:${version}`;
+}
+
+function resolveExistingContractId(
+  auth: AuthenticatedClient,
+  tail: string,
+  version: string,
+  envOverride?: number
+): number {
+  if (envOverride) return envOverride;
+
+  const tenantId = auth.did.slice("did:t3n:".length);
+  const key = contractLookupKey(tenantId, tail, version);
+  const known = KNOWN_CONTRACT_IDS[key];
+  if (known) return known;
+
+  throw new Error(
+    `[Setup] No contract id for ${key}. Run setup:tenants once, then set ` +
+      `${tail === "privalend" ? "PRIVALEND" : "CONSORTIUM"}_CONTRACT_ID in .env ` +
+      `or update KNOWN_CONTRACT_IDS in tenant-setup.ts`
+  );
+}
 
 async function ensureContractMapAccess(
   auth: AuthenticatedClient,
@@ -49,7 +74,7 @@ export async function setupPrivaLendTenant(): Promise<TenantDeployment> {
   console.log(`[Setup] PrivaLend tenant DID: ${auth.did}`);
 
   const CONTRACT_TAIL = "privalend";
-  const CONTRACT_VERSION = "0.2.0";
+  const CONTRACT_VERSION = "0.2.2";
   const WASM_PATH = resolve(import.meta.dirname, "../../contracts/privalend/target/wasm32-wasip2/release/z_privalend.wasm");
 
   const tenantId = auth.did.slice("did:t3n:".length);
@@ -70,8 +95,8 @@ export async function setupPrivaLendTenant(): Promise<TenantDeployment> {
   } catch (e: any) {
     if (e.message?.includes("is not higher than current version")) {
       console.log(`[Setup] Contract already deployed at ${scriptName} — connecting to existing`);
-      contractId = KNOWN_CONTRACT_IDS[CONTRACT_TAIL]?.[CONTRACT_VERSION] ?? 189;
-      console.log(`[Setup] Using known contract id #${contractId} for ${CONTRACT_VERSION}`);
+      contractId = resolveExistingContractId(auth, CONTRACT_TAIL, CONTRACT_VERSION, config.privalend.contractId);
+      console.log(`[Setup] Using contract id #${contractId} for ${CONTRACT_VERSION}`);
     } else {
       throw e;
     }
@@ -135,7 +160,7 @@ export async function setupConsortiumTenant(): Promise<TenantDeployment> {
   console.log(`[Setup] Consortium tenant DID: ${auth.did}`);
 
   const CONTRACT_TAIL = "fraud-check";
-  const CONTRACT_VERSION = "0.1.0";
+  const CONTRACT_VERSION = "0.1.1";
   const WASM_PATH = resolve(import.meta.dirname, "../../contracts/fraud-consortium/target/wasm32-wasip2/release/z_fraud_consortium.wasm");
 
   const tenantId = auth.did.slice("did:t3n:".length);
@@ -155,8 +180,8 @@ export async function setupConsortiumTenant(): Promise<TenantDeployment> {
   } catch (e: any) {
     if (e.message?.includes("is not higher than current version")) {
       console.log(`[Setup] Contract already deployed at ${scriptName} — connecting to existing`);
-      contractId = KNOWN_CONTRACT_IDS[CONTRACT_TAIL]?.[CONTRACT_VERSION] ?? 183;
-      console.log(`[Setup] Using known contract id #${contractId} for ${CONTRACT_VERSION}`);
+      contractId = resolveExistingContractId(auth, CONTRACT_TAIL, CONTRACT_VERSION, config.consortium.contractId);
+      console.log(`[Setup] Using contract id #${contractId} for ${CONTRACT_VERSION}`);
     } else {
       throw e;
     }

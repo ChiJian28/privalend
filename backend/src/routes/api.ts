@@ -1,7 +1,28 @@
 import { Router } from "express";
 import { emitInspectorEvent } from "../websocket.js";
-import { runAgentWorkflow, type WorkflowResult, type ProfileInput } from "../t3n/agent-workflow.js";
+import { runAgentWorkflow, runApplicationPhase, type WorkflowResult, type ProfileInput } from "../t3n/agent-workflow.js";
+import { createWorkflowSession, consumeWorkflowSession } from "../t3n/workflow-session.js";
 import type { TenantDeployment } from "../t3n/tenant-setup.js";
+
+const DEFAULT_LOAN = { amount: 50000, termMonths: 36, purpose: "personal" as const };
+
+function withSession(
+  userDid: string,
+  loanRequest: { amount: number; termMonths: number; purpose: string },
+  result: WorkflowResult
+): WorkflowResult {
+  const enriched = { ...result, userDid };
+  if (result.step === "offers_ready") {
+    enriched.sessionId = createWorkflowSession({
+      userDid,
+      loanRequest,
+      fraudCheck: result.fraudCheck,
+      eligibility: result.eligibility,
+      offers: result.offers,
+    });
+  }
+  return enriched;
+}
 
 export function createApiRouter(
   privalend: TenantDeployment | null,
@@ -72,6 +93,24 @@ export function createApiRouter(
         return res.status(400).json({ error: "selectedOfferId is required" });
       }
 
+      const { sessionId } = req.body;
+      if (sessionId) {
+        const session = consumeWorkflowSession(sessionId);
+        if (!session) {
+          return res.status(404).json({ error: "Session expired or not found. Run workflow start first." });
+        }
+        const result = await runApplicationPhase(
+          session.userDid,
+          session.loanRequest,
+          session.eligibility,
+          selectedOfferId,
+          session.offers,
+          privalend,
+          consortium
+        );
+        return res.json({ success: true, result });
+      }
+
       const result = await runAgentWorkflow(
         userDid || "did:t3n:demo_user_001",
         {
@@ -139,7 +178,10 @@ export function createApiRouter(
           nationality: p.nationality,
         };
 
-        const result = await runAgentWorkflow(
+        const result = withSession(
+          p.userDid,
+          { amount: 50000, termMonths: 36, purpose: "personal" },
+          await runAgentWorkflow(
           p.userDid,
           { amount: 50000, termMonths: 36, purpose: "personal" },
           privalend,
@@ -147,9 +189,10 @@ export function createApiRouter(
           undefined,
           profileInput,
           p.flagged
+          )
         );
 
-        return res.json({ success: true, result });
+        return res.json({ success: true, result, userDid: p.userDid, sessionId: result.sessionId });
       }
 
       // Custom profile mode: user-provided financial data → sealed directly into TEE
@@ -166,16 +209,21 @@ export function createApiRouter(
 
         const profileInput: ProfileInput = { annual_income, total_debt, nationality };
 
-        const result = await runAgentWorkflow(
-          "did:t3n:custom_user",
-          { amount: 50000, termMonths: 36, purpose: "personal" },
+        const customDid = "did:t3n:custom_user";
+        const result = withSession(
+          customDid,
+          DEFAULT_LOAN,
+          await runAgentWorkflow(
+          customDid,
+          DEFAULT_LOAN,
           privalend,
           consortium,
           undefined,
           profileInput
+          )
         );
 
-        return res.json({ success: true, result });
+        return res.json({ success: true, result, userDid: customDid, sessionId: result.sessionId });
       }
 
       // Default: original Alan Turing demo (uses fallback profile in contract)
@@ -187,14 +235,19 @@ export function createApiRouter(
         highlight: "blue",
       });
 
-      const result = await runAgentWorkflow(
-        "did:t3n:demo_user_alan_turing",
+      const alanDid = "did:t3n:demo_user_alan_turing";
+      const result = withSession(
+        alanDid,
+        { amount: 50000, termMonths: 36, purpose: "home_improvement" },
+        await runAgentWorkflow(
+        alanDid,
         { amount: 50000, termMonths: 36, purpose: "home_improvement" },
         privalend,
         consortium
+        )
       );
 
-      res.json({ success: true, result });
+      res.json({ success: true, result, userDid: alanDid, sessionId: result.sessionId });
     } catch (error: any) {
       const requestId = error.message?.match(/\[([0-9a-f-]{36})\]/i)?.[1];
       res.status(500).json({
@@ -213,7 +266,7 @@ export function createApiRouter(
    */
   router.post("/demo/apply", async (req, res) => {
     try {
-      const { selectedOfferId } = req.body;
+      const { selectedOfferId, sessionId } = req.body;
 
       if (!privalend || !consortium) {
         return res.status(503).json({
@@ -221,12 +274,26 @@ export function createApiRouter(
         });
       }
 
-      const result = await runAgentWorkflow(
-        "did:t3n:demo_user_alan_turing",
-        { amount: 50000, termMonths: 36, purpose: "home_improvement" },
+      if (!sessionId) {
+        return res.status(400).json({ error: "sessionId is required — run /api/demo/start first" });
+      }
+      if (!selectedOfferId) {
+        return res.status(400).json({ error: "selectedOfferId is required" });
+      }
+
+      const session = consumeWorkflowSession(sessionId);
+      if (!session) {
+        return res.status(404).json({ error: "Session expired or not found. Start the workflow again." });
+      }
+
+      const result = await runApplicationPhase(
+        session.userDid,
+        session.loanRequest,
+        session.eligibility,
+        selectedOfferId,
+        session.offers,
         privalend,
-        consortium,
-        selectedOfferId || "offer_dbs_003"
+        consortium
       );
 
       res.json({ success: true, result });
@@ -261,7 +328,7 @@ export function createApiRouter(
 
     try {
       await consortium.auth.tenantClient.contracts.execute("fraud-check", {
-        version: "0.1.0",
+        version: consortium.scriptVersion,
         functionName: "check-blacklist",
         input: { user_did: "did:t3n:health_probe" },
       });

@@ -60,6 +60,20 @@ function createEvent(partial: Omit<InspectorEvent, "id" | "timestamp">): Inspect
   return { ...partial, id: `evt_${++eventCounter}`, timestamp: Date.now() };
 }
 
+/** Backend LoanOffer may use camelCase from TEE normalization. */
+function normalizeFrontendOffers(raw: Record<string, unknown>[]): LoanOffer[] {
+  return raw.map((o) => ({
+    id: String(o.id),
+    lender: String(o.lender),
+    amount: Number(o.amount),
+    interest_rate: Number(o.interest_rate ?? o.interestRate),
+    term_months: Number(o.term_months ?? o.termMonths),
+    monthly_payment: Number(o.monthly_payment ?? o.monthlyPayment),
+    total_cost: Number(o.total_cost ?? o.totalCost),
+    features: Array.isArray(o.features) ? o.features.map(String) : [],
+  }));
+}
+
 export function useWorkflow(): WorkflowState {
   const [step, setStep] = useState<WorkflowStep>(0);
   const [isLoading, setIsLoading] = useState(false);
@@ -71,7 +85,10 @@ export function useWorkflow(): WorkflowState {
   const [credential, setCredential] = useState<CredentialIssueResult | null>(null);
   const [connected, setConnected] = useState(false);
   const userDidRef = useRef("did:t3n:demo_user_alan_turing");
+  const sessionIdRef = useRef<string | null>(null);
   const socketRef = useRef<Socket | null>(null);
+  /** When true, UI step progression is driven by startWorkflow/selectOffer — not WS events. */
+  const liveFlowActiveRef = useRef(false);
 
   // Try connecting to backend WebSocket
   useEffect(() => {
@@ -92,13 +109,9 @@ export function useWorkflow(): WorkflowState {
       console.log("[WS] Backend unavailable — using simulated mode");
     });
 
-    // Listen for real Inspector events from backend
+    // Listen for real Inspector events from backend (Inspector panel only — not step UI)
     socket.on("inspector_event", (event: InspectorEvent) => {
       setEvents((prev) => [...prev, { ...event, id: `evt_${++eventCounter}` }]);
-      // Auto-advance step based on backend events
-      if (event.step > 0) {
-        setStep(event.step as WorkflowStep);
-      }
     });
 
     return () => { socket.disconnect(); };
@@ -109,6 +122,54 @@ export function useWorkflow(): WorkflowState {
   }, []);
 
   const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  /** Live mode: stage step 2→3 UI (caller already showed step 1 while TEE ran). */
+  async function playLiveStartSequence(result: {
+    step?: string;
+    fraudCheck?: { is_flagged: boolean; risk_level: string };
+    eligibility?: { score: number; tier: string; max_loan_amount: number; approved: boolean };
+    offers?: LoanOffer[];
+  }) {
+    liveFlowActiveRef.current = true;
+    setFraudResult(null);
+    setEligibility(null);
+    setOffers([]);
+    setCredential(null);
+
+    setStep(2);
+    await delay(1200); // Industry Fraud Screening — spinner visible
+    if (result.fraudCheck) setFraudResult(result.fraudCheck);
+
+    if (result.step === "fraud_check_failed") {
+      if (result.eligibility) setEligibility(result.eligibility);
+      liveFlowActiveRef.current = false;
+      return;
+    }
+
+    await delay(1200); // Credit Assessment — spinner after fraud completes
+    if (result.eligibility) setEligibility(result.eligibility);
+
+    await delay(800);
+    setStep(3);
+    if (result.offers) setOffers(normalizeFrontendOffers(result.offers as Record<string, unknown>[]));
+    liveFlowActiveRef.current = false;
+  }
+
+  /** Live mode: stage apply → success transition. */
+  async function playLiveApplySequence(result: {
+    applicationResult?: { status: string; reference: string; lender: string };
+    credential?: CredentialIssueResult;
+  }) {
+    liveFlowActiveRef.current = true;
+    // await delay(1500); // placeholder submission
+    // await delay(1200); // TEE resolves PII
+    await delay(600);
+
+    if (result.applicationResult) setApplicationResult(result.applicationResult);
+    if (result.credential) setCredential(result.credential);
+    setStep(4);
+    liveFlowActiveRef.current = false;
+  }
 
   // Try calling the real backend API
   const callBackend = useCallback(async (path: string, body?: object): Promise<any | null> => {
@@ -129,24 +190,29 @@ export function useWorkflow(): WorkflowState {
     setIsLoading(true);
     setEvents([]);
     eventCounter = 0;
+    setFraudResult(null);
+    setEligibility(null);
+    setOffers([]);
+    setApplicationResult(null);
+    setCredential(null);
+    sessionIdRef.current = null;
 
-    // Try real backend first
     const body: Record<string, any> = {};
     if (options?.persona) body.persona = options.persona;
     if (options?.profile) body.profile = options.profile;
 
-    const backendResult = await callBackend("/api/demo/start", Object.keys(body).length > 0 ? body : undefined);
+    // Show step 1 while TEE runs; minimum dwell so Connect phase is visible
+    setStep(1);
+    const [backendResult] = await Promise.all([
+      callBackend("/api/demo/start", Object.keys(body).length > 0 ? body : undefined),
+      delay(800),
+    ]);
+
     if (backendResult?.success) {
-      const result = backendResult.result;
-      if (result.fraudCheck) setFraudResult(result.fraudCheck);
-      if (result.eligibility) setEligibility(result.eligibility);
-      if (result.offers) setOffers(result.offers);
-      if (result.step === "fraud_check_failed") {
-        setStep(2);
-      } else {
-        setStep(3);
-      }
-      setCredential(null);
+      sessionIdRef.current = backendResult.sessionId ?? backendResult.result?.sessionId ?? null;
+      if (backendResult.userDid) userDidRef.current = backendResult.userDid;
+      else if (backendResult.result?.userDid) userDidRef.current = backendResult.result.userDid;
+      await playLiveStartSequence(backendResult.result);
       setIsLoading(false);
       return;
     }
@@ -218,7 +284,7 @@ export function useWorkflow(): WorkflowState {
     addEvent({ type: "agent_action", step: 1, title: "agent-auth-update (User Delegation)", content: JSON.stringify({
       agentDid: "did:t3n:5e3d9ba298d2ec5ab8913965fac01435560cf8ee",
       scripts: [{
-        scriptName: "z:6ec1a64ea7733c6b8e87327db829dfae0648a197:privalend",
+        scriptName: "z:8b5e0d443d68570f4800da31e46d1581d603b8db:privalend",
         functions: ["assess-eligibility", "fetch-offers", "submit-application", "issue-credit-credential"],
         allowedHosts: ["localhost:4000"]
       }, {
@@ -258,7 +324,7 @@ export function useWorkflow(): WorkflowState {
     await delay(600);
 
     // Credit Assessment
-    addEvent({ type: "agent_action", step: 2, title: "Credit Assessment Call", content: `executeAndDecode(\n  "z:6ec1a64ea7733c6b8e87327db829dfae0648a197:privalend",\n  "assess-eligibility"\n)\nInput: { fraud_result: { is_flagged: false }, loan_amount: 50000 }\n\n🔐 User financial data resolved inside TEE only.`, highlight: "blue" });
+    addEvent({ type: "agent_action", step: 2, title: "Credit Assessment Call", content: `executeAndDecode(\n  "z:8b5e0d443d68570f4800da31e46d1581d603b8db:privalend",\n  "assess-eligibility"\n)\nInput: { fraud_result: { is_flagged: false }, loan_amount: 50000 }\n\n🔐 User financial data resolved inside TEE only.`, highlight: "blue" });
     await delay(1000);
 
     addEvent({ type: "tee_simulated", step: 2, title: "Inside PrivaLend Enclave", content: `📍 TEE Node: Intel TDX Secure Enclave\n\nFetching user financial profile from KV store...\n  → Annual Income: $${simIncome.toLocaleString()}\n  → Total Debt: $${simDebt.toLocaleString()}\n  → Nationality: ${simNationality}\n\nComputing credit score...\n  DTI Ratio: ${(dti * 100).toFixed(1)}%\n  Score: ${simScore} (${simTier.toUpperCase()})\n  Max Loan: $${Math.round(simMaxLoan).toLocaleString()}\n\n⚠️ Raw financial data destroyed in enclave memory.`, highlight: "gray" });
@@ -299,13 +365,17 @@ export function useWorkflow(): WorkflowState {
     const selected = offers.find(o => o.id === offerId);
     if (!selected) return;
 
-    // Try real backend
-    const backendResult = await callBackend("/api/demo/apply", { selectedOfferId: offerId });
+    // Try real backend (stay on step 3 while submitting; uses start session)
+    if (!sessionIdRef.current) {
+      console.warn("[Workflow] No sessionId — apply may fail in Live mode");
+    }
+    const backendPromise = callBackend("/api/demo/apply", {
+      selectedOfferId: offerId,
+      sessionId: sessionIdRef.current,
+    });
+    const backendResult = await backendPromise;
     if (backendResult?.success) {
-      const result = backendResult.result;
-      if (result.applicationResult) setApplicationResult(result.applicationResult);
-      if (result.credential) setCredential(result.credential);
-      setStep(4);
+      await playLiveApplySequence(backendResult.result);
       setIsLoading(false);
       return;
     }
@@ -371,6 +441,7 @@ export function useWorkflow(): WorkflowState {
 
   const reset = useCallback(() => {
     clearWalletDemoStorage();
+    sessionIdRef.current = null;
     setStep(0);
     setIsLoading(false);
     setEvents([]);

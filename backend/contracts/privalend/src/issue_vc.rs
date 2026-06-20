@@ -1,4 +1,3 @@
-use crate::host::interfaces::logging;
 use crate::host::tenant::tenant_context;
 use serde::{Deserialize, Serialize};
 
@@ -91,11 +90,6 @@ pub fn issue_credit_credential(input: &[u8]) -> Result<Vec<u8>, String> {
 
     let tier_label = tier_display(&req.tier, req.score);
     let vc_id = format!("https://privalend.demo/credentials/{}", req.reference);
-
-    let _ = logging::info(&format!(
-        "Issuing Verifiable Credit Credential inside TEE for {} — score={}, tier={}",
-        req.user_did, req.score, tier_label
-    ));
 
     let credential = VerifiableCredential {
         context: vec![

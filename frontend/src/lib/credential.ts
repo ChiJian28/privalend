@@ -1,4 +1,4 @@
-export const PRIVALEND_ISSUER_DID = "did:t3n:6ec1a64ea7733c6b8e87327db829dfae0648a197";
+export const PRIVALEND_ISSUER_DID = "did:t3n:8b5e0d443d68570f4800da31e46d1581d603b8db";
 
 export interface CreditCredentialProof {
   type: string;

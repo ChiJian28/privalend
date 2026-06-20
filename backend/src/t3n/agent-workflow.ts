@@ -56,6 +56,8 @@ export interface LoanOffer {
 
 export interface WorkflowResult {
   step: string;
+  userDid?: string;
+  sessionId?: string;
   fraudCheck: { is_flagged: boolean; risk_level: string };
   eligibility: { score: number; tier: string; max_loan_amount: number };
   offers: LoanOffer[];
@@ -67,6 +69,156 @@ export interface ProfileInput {
   annual_income: number;
   total_debt: number;
   nationality: string;
+}
+
+type AgentClient = Awaited<ReturnType<typeof createAgentClient>>;
+
+function normalizeOffer(raw: Record<string, unknown>): LoanOffer {
+  return {
+    id: String(raw.id),
+    lender: String(raw.lender),
+    amount: Number(raw.amount),
+    interestRate: Number(raw.interest_rate ?? raw.interestRate),
+    termMonths: Number(raw.term_months ?? raw.termMonths),
+    monthlyPayment: Number(raw.monthly_payment ?? raw.monthlyPayment),
+    totalCost: Number(raw.total_cost ?? raw.totalCost),
+  };
+}
+
+async function submitSelectedOffer(
+  userDid: string,
+  loanRequest: { amount: number; termMonths: number; purpose: string },
+  eligibility: { score: number; tier: string; max_loan_amount: number },
+  selectedOfferId: string,
+  offers: LoanOffer[],
+  privalend: TenantDeployment,
+  agent: AgentClient
+): Promise<{ applicationResult: { status: string; reference: string; lender: string }; credential: CredentialIssueResult }> {
+  const selectedOffer = offers.find((o) => o.id === selectedOfferId);
+  if (!selectedOffer) throw new Error(`Offer ${selectedOfferId} not found in session`);
+
+  const placeholderPayload = {
+    offer_id: selectedOfferId,
+    loan_amount: loanRequest.amount,
+    term_months: loanRequest.termMonths,
+    applicant_name: "{{profile.first_name}} {{profile.last_name}}",
+    applicant_email: "{{profile.verified_contacts.email.value}}",
+    applicant_id: "{{profile.id_number}}",
+    applicant_dob: "{{profile.date_of_birth}}",
+  };
+
+  emitInspectorEvent({
+    type: "placeholder_before",
+    step: 3,
+    title: "Agent Sends (with Placeholders — PII hidden)",
+    content: JSON.stringify(placeholderPayload, null, 2),
+    highlight: "red",
+  });
+
+  const applicationResult = await agent.client.executeAndDecode({
+    script_name: privalend.scriptName,
+    script_version: privalend.scriptVersion,
+    function_name: "submit-application",
+    input: {
+      offer_id: selectedOfferId,
+      loan_amount: loanRequest.amount,
+      term_months: loanRequest.termMonths,
+      lender: selectedOffer.lender,
+    },
+  }) as { status: string; reference: string; lender: string };
+
+  await fetchAndEmitTeeLogs(privalend, 3, "PrivaLend Application Enclave");
+
+  try {
+    const bankResponse = await fetch(`${config.mockBank.baseUrl}/last-received`);
+    const bankPayload = await bankResponse.json();
+
+    emitInspectorEvent({
+      type: "placeholder_after",
+      step: 3,
+      title: "Bank Actually Received (PII resolved by T3N Node)",
+      content: JSON.stringify(bankPayload, null, 2),
+      highlight: "green",
+    });
+  } catch {
+    emitInspectorEvent({
+      type: "placeholder_after",
+      step: 3,
+      title: "T3N Node Resolved Placeholders",
+      content: `Placeholders resolved inside TEE:\n  {{profile.first_name}} → resolved\n  {{profile.last_name}} → resolved\n  {{profile.id_number}} → resolved\n  {{profile.date_of_birth}} → resolved\n\nBank received real PII. Agent never saw it.`,
+      highlight: "green",
+    });
+  }
+
+  emitInspectorEvent({
+    type: "audit_log",
+    step: 4,
+    title: "Immutable Audit Trail",
+    content: `[${new Date().toISOString()}] Loan application submitted\n  Agent DID: ${agent.did}\n  User DID: ${userDid}\n  Lender: ${selectedOffer.lender}\n  Amount: $${loanRequest.amount}\n  PII exposure to Agent: 0 bytes\n  Cross-tenant fraud check: PASSED\n  TEE-computed credit score: ${eligibility.score}\n  All operations logged to T3N Merkle ledger.`,
+    highlight: "blue",
+  });
+
+  const credential = await issueCreditCredential(
+    {
+      userDid,
+      score: eligibility.score,
+      tier: eligibility.tier,
+      maxLoanAmount: eligibility.max_loan_amount,
+      reference: applicationResult.reference,
+      issuerDid: privalend.auth.did,
+    },
+    privalend,
+    agent,
+    4
+  );
+
+  await fetchAndEmitTeeLogs(privalend, 4, "PrivaLend VC Issuance Enclave");
+
+  return { applicationResult, credential };
+}
+
+/**
+ * Apply phase only — submit selected offer + issue VC using an existing start session.
+ * Does NOT re-run fraud check, eligibility, or fetch-offers.
+ */
+export async function runApplicationPhase(
+  userDid: string,
+  loanRequest: { amount: number; termMonths: number; purpose: string },
+  eligibility: { score: number; tier: string; max_loan_amount: number },
+  selectedOfferId: string,
+  offers: LoanOffer[],
+  privalend: TenantDeployment,
+  _consortium: TenantDeployment
+): Promise<WorkflowResult> {
+  emitInspectorEvent({
+    type: "system",
+    step: 3,
+    title: "Submitting Application (continuing session)",
+    content: `User DID: ${userDid}\nOffer: ${selectedOfferId}\nSkipping re-run of fraud/eligibility — using completed start session.`,
+    highlight: "blue",
+  });
+
+  const agent = await createAgentClient(config.agent.apiKey);
+
+  const { applicationResult, credential } = await submitSelectedOffer(
+    userDid,
+    loanRequest,
+    eligibility,
+    selectedOfferId,
+    offers,
+    privalend,
+    agent
+  );
+
+  return {
+    step: "application_submitted",
+    userDid,
+    fraudCheck: { is_flagged: false, risk_level: "low" },
+    eligibility,
+    offers,
+    applicationResult,
+    credential,
+  };
 }
 
 /**
@@ -230,7 +382,9 @@ export async function runAgentWorkflow(
       purpose: loanRequest.purpose,
       credit_score: eligibility.score,
     },
-  }) as { offers: LoanOffer[]; total_found: number };
+  }) as { offers: Record<string, unknown>[]; total_found: number };
+
+  const normalizedOffers = offersResult.offers.map(normalizeOffer);
 
   // Fetch real TEE logs from the PrivaLend offers contract
   await fetchAndEmitTeeLogs(privalend, 3, "PrivaLend Offers Enclave");
@@ -239,105 +393,31 @@ export async function runAgentWorkflow(
     type: "agent_received",
     step: 3,
     title: `Available Offers (Score: ${eligibility.score} → Dynamic Rates)`,
-    content: JSON.stringify(offersResult.offers, null, 2),
+    content: JSON.stringify(normalizedOffers, null, 2),
     highlight: "green",
   });
 
   const result: WorkflowResult = {
     step: "offers_ready",
+    userDid,
     fraudCheck: fraudResult,
     eligibility,
-    offers: offersResult.offers,
+    offers: normalizedOffers,
   };
 
-  // ===== STEP 3b: Submit Application (if user selected an offer) =====
   if (selectedOfferId) {
-    const selectedOffer = offersResult.offers.find((o: LoanOffer) => o.id === selectedOfferId);
-    if (!selectedOffer) throw new Error(`Offer ${selectedOfferId} not found`);
-
-    const placeholderPayload = {
-      offer_id: selectedOfferId,
-      loan_amount: loanRequest.amount,
-      term_months: loanRequest.termMonths,
-      applicant_name: "{{profile.first_name}} {{profile.last_name}}",
-      applicant_email: "{{profile.verified_contacts.email.value}}",
-      applicant_id: "{{profile.id_number}}",
-      applicant_dob: "{{profile.date_of_birth}}",
-    };
-
-    emitInspectorEvent({
-      type: "placeholder_before",
-      step: 3,
-      title: "Agent Sends (with Placeholders — PII hidden)",
-      content: JSON.stringify(placeholderPayload, null, 2),
-      highlight: "red",
-    });
-
-    const applicationResult = await agent.client.executeAndDecode({
-      script_name: privalend.scriptName,
-      script_version: privalend.scriptVersion,
-      function_name: "submit-application",
-      input: {
-        offer_id: selectedOfferId,
-        loan_amount: loanRequest.amount,
-        term_months: loanRequest.termMonths,
-        lender: selectedOffer.lender,
-      },
-    });
-
-    // Fetch real TEE logs from the application submission
-    await fetchAndEmitTeeLogs(privalend, 3, "PrivaLend Application Enclave");
-
-    // Show what the bank actually received (with resolved PII)
-    try {
-      const bankResponse = await fetch(`${config.mockBank.baseUrl}/last-received`);
-      const bankPayload = await bankResponse.json();
-
-      emitInspectorEvent({
-        type: "placeholder_after",
-        step: 3,
-        title: "Bank Actually Received (PII resolved by T3N Node)",
-        content: JSON.stringify(bankPayload, null, 2),
-        highlight: "green",
-      });
-    } catch {
-      emitInspectorEvent({
-        type: "placeholder_after",
-        step: 3,
-        title: "T3N Node Resolved Placeholders",
-        content: `Placeholders resolved inside TEE:\n  {{profile.first_name}} → resolved\n  {{profile.last_name}} → resolved\n  {{profile.id_number}} → resolved\n  {{profile.date_of_birth}} → resolved\n\nBank received real PII. Agent never saw it.`,
-        highlight: "green",
-      });
-    }
-
-    emitInspectorEvent({
-      type: "audit_log",
-      step: 4,
-      title: "Immutable Audit Trail",
-      content: `[${new Date().toISOString()}] Loan application submitted\n  Agent DID: ${agent.did}\n  User DID: ${userDid}\n  Lender: ${selectedOffer.lender}\n  Amount: $${loanRequest.amount}\n  PII exposure to Agent: 0 bytes\n  Cross-tenant fraud check: PASSED\n  TEE-computed credit score: ${eligibility.score}\n  All operations logged to T3N Merkle ledger.`,
-      highlight: "blue",
-    });
-
-    result.step = "application_submitted";
-    result.applicationResult = applicationResult as { status: string; reference: string; lender: string };
-
-    // ===== STEP 4b: Issue Verifiable Credit Credential (TEE first, demo fallback) =====
-    const appRef = (applicationResult as { reference: string }).reference;
-    result.credential = await issueCreditCredential(
-      {
-        userDid,
-        score: eligibility.score,
-        tier: eligibility.tier,
-        maxLoanAmount: eligibility.max_loan_amount,
-        reference: appRef,
-        issuerDid: privalend.auth.did,
-      },
+    const { applicationResult, credential } = await submitSelectedOffer(
+      userDid,
+      loanRequest,
+      eligibility,
+      selectedOfferId,
+      normalizedOffers,
       privalend,
-      agent,
-      4
+      agent
     );
-
-    await fetchAndEmitTeeLogs(privalend, 4, "PrivaLend VC Issuance Enclave");
+    result.step = "application_submitted";
+    result.applicationResult = applicationResult;
+    result.credential = credential;
   }
 
   // Cleanup: remove Bob from blacklist after successful non-flagged flow (shouldn't happen, but safe)

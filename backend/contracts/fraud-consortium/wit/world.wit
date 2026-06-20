@@ -2,7 +2,6 @@ package z:fraud-consortium@0.1.0;
 
 world fraud-consortium {
   import host:tenant/tenant-context@1.0.0;
-  import host:interfaces/logging@2.1.0;
   import host:interfaces/kv-store@2.1.0;
 
   export contracts;

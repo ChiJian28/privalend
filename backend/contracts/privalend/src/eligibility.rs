@@ -1,4 +1,4 @@
-use crate::host::interfaces::{kv_store, logging};
+use crate::host::interfaces::kv_store;
 use crate::host::tenant::tenant_context;
 use serde::{Deserialize, Serialize};
 
@@ -39,7 +39,6 @@ pub fn assess_eligibility(input: &[u8]) -> Result<Vec<u8>, String> {
 
     // Reject if flagged by fraud consortium
     if req.fraud_result.is_flagged {
-        let _ = logging::info("Eligibility denied: user flagged in fraud check");
         let output = EligibilityOutput {
             score: 0,
             tier: "rejected".to_string(),
@@ -60,8 +59,6 @@ pub fn assess_eligibility(input: &[u8]) -> Result<Vec<u8>, String> {
                 .map_err(|e| format!("parse profile: {e}"))?
         }
         _ => {
-            // Fallback demo profile (in production, this would come from user's T3N data)
-            let _ = logging::info("Using demo financial profile");
             UserFinancialProfile {
                 annual_income: 85000,
                 total_debt: 12000,
@@ -71,8 +68,6 @@ pub fn assess_eligibility(input: &[u8]) -> Result<Vec<u8>, String> {
             }
         }
     };
-
-    let _ = logging::info("Computing credit score inside TEE enclave...");
 
     // Credit scoring algorithm (simplified for demo)
     let dti_ratio = profile.total_debt as f64 / profile.annual_income as f64;
@@ -117,11 +112,6 @@ pub fn assess_eligibility(input: &[u8]) -> Result<Vec<u8>, String> {
 
     let max_loan_amount = (profile.annual_income as f64 * max_multiplier) as u64;
     let approved = max_loan_amount >= req.loan_amount && tier != "declined";
-
-    let _ = logging::info(&format!(
-        "Score: {} | Tier: {} | Max: ${} | Approved: {}",
-        score, tier, max_loan_amount, approved
-    ));
 
     let output = EligibilityOutput {
         score,
