@@ -13,6 +13,7 @@
 
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: #06080d;
 }
 
 .inspector-panel {

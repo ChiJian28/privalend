@@ -7,9 +7,11 @@ import type { InspectorEvent } from "@/hooks/useWorkflow";
 interface Props {
   events: InspectorEvent[];
   currentStep: number;
+  /** Hide duplicate title when embedded in bottom panel tab bar */
+  hideHeader?: boolean;
 }
 
-export function InspectorPanel({ events, currentStep }: Props) {
+export function InspectorPanel({ events, currentStep, hideHeader }: Props) {
   const agentScrollRef = useRef<HTMLDivElement>(null);
   const teeScrollRef = useRef<HTMLDivElement>(null);
 
@@ -27,20 +29,27 @@ export function InspectorPanel({ events, currentStep }: Props) {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--inspector-border)]">
-        <div className="flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-          <span className="text-xs font-semibold tracking-wider uppercase text-[var(--inspector-text)]">
-            🔍 T3N Data Exposure Dashboard
-          </span>
+      {!hideHeader && (
+        <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--inspector-border)]">
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+            <span className="text-xs font-semibold tracking-wider uppercase text-[var(--inspector-text)]">
+              🔍 T3N Data Exposure Dashboard
+            </span>
+          </div>
+          <div className="flex items-center gap-2 text-[10px] text-[var(--inspector-gray)]">
+            <span>Step {currentStep}/4</span>
+            <span>•</span>
+            <span>TEE: Intel TDX</span>
+          </div>
         </div>
-        <div className="flex items-center gap-2 text-[10px] text-[var(--inspector-gray)]">
-          <span>Step {currentStep}/4</span>
-          <span>•</span>
-          <span>TEE: Intel TDX</span>
+      )}
+
+      {hideHeader && (
+        <div className="flex items-center justify-end px-3 py-1 border-b border-[var(--inspector-border)] bg-[#0d1117] shrink-0">
+          <span className="text-[9px] text-[var(--inspector-gray)]">Step {currentStep}/4 · Intel TDX</span>
         </div>
-      </div>
+      )}
 
       {/* Dual-Panel Grid */}
       <div className="flex-1 grid grid-cols-2 gap-0 overflow-hidden">

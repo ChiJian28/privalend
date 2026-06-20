@@ -41,6 +41,8 @@ export interface StartOptions {
 export interface WorkflowState {
   step: WorkflowStep;
   isLoading: boolean;
+  isApplying: boolean;
+  submittingOfferId: string | null;
   events: InspectorEvent[];
   fraudResult: { is_flagged: boolean; risk_level: string } | null;
   eligibility: { score: number; tier: string; max_loan_amount: number; approved: boolean } | null;
@@ -77,6 +79,8 @@ function normalizeFrontendOffers(raw: Record<string, unknown>[]): LoanOffer[] {
 export function useWorkflow(): WorkflowState {
   const [step, setStep] = useState<WorkflowStep>(0);
   const [isLoading, setIsLoading] = useState(false);
+  const [isApplying, setIsApplying] = useState(false);
+  const [submittingOfferId, setSubmittingOfferId] = useState<string | null>(null);
   const [events, setEvents] = useState<InspectorEvent[]>([]);
   const [fraudResult, setFraudResult] = useState<WorkflowState["fraudResult"]>(null);
   const [eligibility, setEligibility] = useState<WorkflowState["eligibility"]>(null);
@@ -142,6 +146,7 @@ export function useWorkflow(): WorkflowState {
 
     if (result.step === "fraud_check_failed") {
       if (result.eligibility) setEligibility(result.eligibility);
+      await delay(800);
       liveFlowActiveRef.current = false;
       return;
     }
@@ -151,7 +156,7 @@ export function useWorkflow(): WorkflowState {
 
     await delay(800);
     setStep(3);
-    if (result.offers) setOffers(normalizeFrontendOffers(result.offers as Record<string, unknown>[]));
+    if (result.offers) setOffers(normalizeFrontendOffers(result.offers as unknown as Record<string, unknown>[]));
     liveFlowActiveRef.current = false;
   }
 
@@ -161,8 +166,8 @@ export function useWorkflow(): WorkflowState {
     credential?: CredentialIssueResult;
   }) {
     liveFlowActiveRef.current = true;
-    // await delay(1500); // placeholder submission
-    // await delay(1200); // TEE resolves PII
+    await delay(1500); // Agent → TEE (placeholders)
+    await delay(1200); // TEE → Lender (PII resolved)
     await delay(600);
 
     if (result.applicationResult) setApplicationResult(result.applicationResult);
@@ -188,6 +193,8 @@ export function useWorkflow(): WorkflowState {
   const startWorkflow = useCallback(async (options?: StartOptions) => {
     clearWalletDemoStorage();
     setIsLoading(true);
+    setIsApplying(false);
+    setSubmittingOfferId(null);
     setEvents([]);
     eventCounter = 0;
     setFraudResult(null);
@@ -361,82 +368,87 @@ export function useWorkflow(): WorkflowState {
   }, [addEvent, callBackend]);
 
   const selectOffer = useCallback(async (offerId: string) => {
-    setIsLoading(true);
     const selected = offers.find(o => o.id === offerId);
     if (!selected) return;
 
-    // Try real backend (stay on step 3 while submitting; uses start session)
-    if (!sessionIdRef.current) {
-      console.warn("[Workflow] No sessionId — apply may fail in Live mode");
-    }
-    const backendPromise = callBackend("/api/demo/apply", {
-      selectedOfferId: offerId,
-      sessionId: sessionIdRef.current,
-    });
-    const backendResult = await backendPromise;
-    if (backendResult?.success) {
-      await playLiveApplySequence(backendResult.result);
+    setIsApplying(true);
+    setSubmittingOfferId(offerId);
+    setIsLoading(true);
+    try {
+      // Try real backend (stay on step 3 while submitting; uses start session)
+      if (!sessionIdRef.current) {
+        console.warn("[Workflow] No sessionId — apply may fail in Live mode");
+      }
+      const backendResult = await callBackend("/api/demo/apply", {
+        selectedOfferId: offerId,
+        sessionId: sessionIdRef.current,
+      });
+      if (backendResult?.success) {
+        await playLiveApplySequence(backendResult.result);
+        return;
+      }
+
+      // === SIMULATED MODE ===
+      addEvent({ type: "placeholder_before", step: 3, title: "Agent Sends → http-with-placeholders", content: JSON.stringify({
+        offer_id: offerId,
+        loan_amount: 50000,
+        term_months: 36,
+        applicant: {
+          full_name: "{{profile.first_name}} {{profile.last_name}}",
+          email: "{{profile.verified_contacts.email.value}}",
+          date_of_birth: "{{profile.date_of_birth}}",
+          id_number: "{{profile.id_number}}",
+          phone: "{{profile.verified_contacts.phone.value}}"
+        }
+      }, null, 2), highlight: "red" });
+      await delay(1500);
+
+      addEvent({ type: "tee_simulated", step: 3, title: "T3N Node Resolving Placeholders", content: "📍 Inside TEE — Resolving profile markers...\n\n  {{profile.first_name}}    → \"Alan\"\n  {{profile.last_name}}     → \"Turing\"\n  {{profile.email}}         → \"alan@example.com\"\n  {{profile.id_number}}     → \"S1234567A\"\n  {{profile.date_of_birth}} → \"1912-06-23\"\n\nSending resolved payload to bank...\nAgent NEVER sees these values.", highlight: "gray" });
+      await delay(1200);
+
+      addEvent({ type: "placeholder_after", step: 3, title: "Bank Received (PII Resolved)", content: JSON.stringify({
+        offer_id: offerId,
+        loan_amount: 50000,
+        term_months: 36,
+        applicant: {
+          full_name: "Alan Turing",
+          email: "alan@example.com",
+          date_of_birth: "1912-06-23",
+          id_number: "S1234567A",
+          phone: "+65 9123 4567"
+        }
+      }, null, 2), highlight: "green" });
+      await delay(800);
+
+      // Step 4: Success
+      setStep(4);
+      const result = { status: "approved", reference: "PL-DBS-2026A7F", lender: selected.lender };
+      setApplicationResult(result);
+
+      addEvent({ type: "audit_log", step: 4, title: "Immutable Audit Trail (Merkle-backed)", content: `[${new Date().toISOString()}] Loan application complete\n\n  ┌─────────────────────────────────────────┐\n  │ Agent DID:  did:t3n:5e3d9ba2...         │\n  │ User DID:   ${userDidRef.current.slice(0, 28).padEnd(28)}│\n  │ Lender:     ${selected.lender.padEnd(28)}│\n  │ Amount:     $50,000                     │\n  │ Reference:  PL-DBS-2026A7F              │\n  ├─────────────────────────────────────────┤\n  │ PII Exposure to Agent: 0 bytes   ✓      │\n  │ Cross-Tenant Calls:    1 (Consortium)   │\n  │ Placeholder Fields:    5 resolved       │\n  │ Fraud Check:           PASSED           │\n  └─────────────────────────────────────────┘`, highlight: "blue" });
+      await delay(600);
+
+      const vcResult = buildDemoCredential({
+        userDid: userDidRef.current,
+        score: eligibility?.score ?? 780,
+        tier: eligibility?.tier ?? "prime",
+        maxLoanAmount: eligibility?.max_loan_amount ?? 150000,
+        reference: result.reference,
+      });
+      setCredential(vcResult);
+
+      addEvent({
+        type: "vc_issued",
+        step: 4,
+        title: "🪪 Verifiable Credit Credential [DEMO MODE]",
+        content: JSON.stringify(vcResult.credential, null, 2),
+        highlight: "yellow",
+      });
+    } finally {
+      setIsApplying(false);
+      setSubmittingOfferId(null);
       setIsLoading(false);
-      return;
     }
-
-    // === SIMULATED MODE ===
-    addEvent({ type: "placeholder_before", step: 3, title: "Agent Sends → http-with-placeholders", content: JSON.stringify({
-      offer_id: offerId,
-      loan_amount: 50000,
-      term_months: 36,
-      applicant: {
-        full_name: "{{profile.first_name}} {{profile.last_name}}",
-        email: "{{profile.verified_contacts.email.value}}",
-        date_of_birth: "{{profile.date_of_birth}}",
-        id_number: "{{profile.id_number}}",
-        phone: "{{profile.verified_contacts.phone.value}}"
-      }
-    }, null, 2), highlight: "red" });
-    await delay(1500);
-
-    addEvent({ type: "tee_simulated", step: 3, title: "T3N Node Resolving Placeholders", content: "📍 Inside TEE — Resolving profile markers...\n\n  {{profile.first_name}}    → \"Alan\"\n  {{profile.last_name}}     → \"Turing\"\n  {{profile.email}}         → \"alan@example.com\"\n  {{profile.id_number}}     → \"S1234567A\"\n  {{profile.date_of_birth}} → \"1912-06-23\"\n\nSending resolved payload to bank...\nAgent NEVER sees these values.", highlight: "gray" });
-    await delay(1200);
-
-    addEvent({ type: "placeholder_after", step: 3, title: "Bank Received (PII Resolved)", content: JSON.stringify({
-      offer_id: offerId,
-      loan_amount: 50000,
-      term_months: 36,
-      applicant: {
-        full_name: "Alan Turing",
-        email: "alan@example.com",
-        date_of_birth: "1912-06-23",
-        id_number: "S1234567A",
-        phone: "+65 9123 4567"
-      }
-    }, null, 2), highlight: "green" });
-    await delay(800);
-
-    // Step 4: Success
-    setStep(4);
-    const result = { status: "approved", reference: "PL-DBS-2026A7F", lender: selected.lender };
-    setApplicationResult(result);
-
-    addEvent({ type: "audit_log", step: 4, title: "Immutable Audit Trail (Merkle-backed)", content: `[${new Date().toISOString()}] Loan application complete\n\n  ┌─────────────────────────────────────────┐\n  │ Agent DID:  did:t3n:5e3d9ba2...         │\n  │ User DID:   ${userDidRef.current.slice(0, 28).padEnd(28)}│\n  │ Lender:     ${selected.lender.padEnd(28)}│\n  │ Amount:     $50,000                     │\n  │ Reference:  PL-DBS-2026A7F              │\n  ├─────────────────────────────────────────┤\n  │ PII Exposure to Agent: 0 bytes   ✓      │\n  │ Cross-Tenant Calls:    1 (Consortium)   │\n  │ Placeholder Fields:    5 resolved       │\n  │ Fraud Check:           PASSED           │\n  └─────────────────────────────────────────┘`, highlight: "blue" });
-    await delay(600);
-
-    const vcResult = buildDemoCredential({
-      userDid: userDidRef.current,
-      score: eligibility?.score ?? 780,
-      tier: eligibility?.tier ?? "prime",
-      maxLoanAmount: eligibility?.max_loan_amount ?? 150000,
-      reference: result.reference,
-    });
-    setCredential(vcResult);
-
-    addEvent({
-      type: "vc_issued",
-      step: 4,
-      title: "🪪 Verifiable Credit Credential [DEMO MODE]",
-      content: JSON.stringify(vcResult.credential, null, 2),
-      highlight: "yellow",
-    });
-    setIsLoading(false);
   }, [offers, addEvent, callBackend, eligibility]);
 
   const reset = useCallback(() => {
@@ -444,6 +456,8 @@ export function useWorkflow(): WorkflowState {
     sessionIdRef.current = null;
     setStep(0);
     setIsLoading(false);
+    setIsApplying(false);
+    setSubmittingOfferId(null);
     setEvents([]);
     setFraudResult(null);
     setEligibility(null);
@@ -453,5 +467,5 @@ export function useWorkflow(): WorkflowState {
     eventCounter = 0;
   }, []);
 
-  return { step, isLoading, events, fraudResult, eligibility, offers, applicationResult, credential, connected, startWorkflow, selectOffer, reset };
+  return { step, isLoading, isApplying, submittingOfferId, events, fraudResult, eligibility, offers, applicationResult, credential, connected, startWorkflow, selectOffer, reset };
 }
