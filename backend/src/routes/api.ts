@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type Request, type Response } from "express";
 import { emitInspectorEvent } from "../websocket.js";
 import { runAgentWorkflow, runApplicationPhase, type WorkflowResult, type ProfileInput } from "../t3n/agent-workflow.js";
 import { createWorkflowSession, consumeWorkflowSession } from "../t3n/workflow-session.js";
@@ -34,7 +34,7 @@ export function createApiRouter(
    * POST /api/workflow/start
    * Starts the full agent workflow: fraud check → eligibility → offers
    */
-  router.post("/workflow/start", async (req, res) => {
+  router.post("/workflow/start", async (req: Request, res: Response) => {
     try {
       const { userDid, loanAmount, termMonths, purpose } = req.body;
 
@@ -79,7 +79,7 @@ export function createApiRouter(
    * POST /api/workflow/apply
    * Submit application for a selected offer
    */
-  router.post("/workflow/apply", async (req, res) => {
+  router.post("/workflow/apply", async (req: Request, res: Response) => {
     try {
       const { userDid, loanAmount, termMonths, purpose, selectedOfferId } = req.body;
 
@@ -145,7 +145,7 @@ export function createApiRouter(
    *   - { profile: { annual_income, total_debt, nationality } }
    *   - {} (default: Alan Turing demo)
    */
-  router.post("/demo/start", async (req, res) => {
+  router.post("/demo/start", async (req: Request, res: Response) => {
     try {
       if (!privalend || !consortium) {
         return res.status(503).json({
@@ -264,7 +264,7 @@ export function createApiRouter(
    * POST /api/demo/apply
    * Demo mode: submit application for a specific offer
    */
-  router.post("/demo/apply", async (req, res) => {
+  router.post("/demo/apply", async (req: Request, res: Response) => {
     try {
       const { selectedOfferId, sessionId } = req.body;
 
@@ -306,7 +306,7 @@ export function createApiRouter(
    * GET /api/tee-health
    * Probes T3N testnet TEE contract execution (diagnostic)
    */
-  router.get("/tee-health", async (_req, res) => {
+  router.get("/tee-health", async (_req: Request, res: Response) => {
     if (!consortium) {
       return res.status(503).json({ tee: "unavailable", reason: "consortium not deployed" });
     }
@@ -356,7 +356,7 @@ export function createApiRouter(
    * GET /api/status
    * Returns deployment status of both tenants
    */
-  router.get("/status", (_req, res) => {
+  router.get("/status", (_req: Request, res: Response) => {
     res.json({
       privalend: privalend
         ? { deployed: true, scriptName: privalend.scriptName, contractId: privalend.contractId }
