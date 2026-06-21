@@ -85,7 +85,7 @@ A custom-built UI that splits the user's perspective into two realities: The res
 ## Tech Stack
 
 - **Frontend** — Next.js 16, React, Tailwind CSS
-- **Backend** — Node.js, Express, TypeScript
+- **Backend** — Node.js, TypeScript
 - **Terminal 3 SDK** — `@terminal3/t3n-sdk`
 - **TEE contracts** — Rust → WASM (`privalend`, `fraud-consortium`)
 
