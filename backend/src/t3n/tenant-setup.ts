@@ -16,8 +16,66 @@ export interface TenantDeployment {
 const KNOWN_CONTRACT_IDS: Record<string, number> = {
   "8b5e0d443d68570f4800da31e46d1581d603b8db:privalend:0.2.1": 274,
   "8b5e0d443d68570f4800da31e46d1581d603b8db:privalend:0.2.2": 276,
+  "c2278f96d01845b152308cb5940a7f6125952ad0:privalend:0.2.2": 401,
   "377025df4be81d8222dd63ecf63a8b351bb109f2:fraud-check:0.1.1": 275,
 };
+
+function shouldSkipWasmRegistration(): boolean {
+  return (
+    process.env.SKIP_WASM_DEPLOY === "true" ||
+    process.env.NODE_ENV === "production"
+  );
+}
+
+async function resolveOrRegisterContract(
+  auth: AuthenticatedClient,
+  options: {
+    tail: string;
+    version: string;
+    wasmPath: string;
+    envContractId?: number;
+  }
+): Promise<{ contractId: number; scriptName: string }> {
+  const { tail, version, wasmPath, envContractId } = options;
+  const tenantId = auth.did.slice("did:t3n:".length);
+  const scriptName = `z:${tenantId}:${tail}`;
+
+  if (shouldSkipWasmRegistration()) {
+    const contractId = resolveExistingContractId(auth, tail, version, envContractId);
+    console.log(
+      `[Setup] Connect-only mode (no WASM) — using contract id #${contractId} for ${scriptName}`
+    );
+    return { contractId, scriptName };
+  }
+
+  try {
+    const wasmBytes = await readFile(wasmPath);
+    console.log(`[Setup] Registering contract (${wasmBytes.length} bytes)...`);
+    const result = (await auth.tenantClient.contracts.register({
+      tail,
+      version,
+      wasm: wasmBytes,
+    })) as { contract_id: number };
+    const contractId = result.contract_id;
+    console.log(`[Setup] Registered ${scriptName} as contract id ${contractId}`);
+    return { contractId, scriptName };
+  } catch (e: any) {
+    if (e.code === "ENOENT") {
+      const contractId = resolveExistingContractId(auth, tail, version, envContractId);
+      console.log(
+        `[Setup] WASM not found at ${wasmPath} — connecting to contract id #${contractId}`
+      );
+      return { contractId, scriptName };
+    }
+    if (e.message?.includes("is not higher than current version")) {
+      console.log(`[Setup] Contract already deployed at ${scriptName} — connecting to existing`);
+      const contractId = resolveExistingContractId(auth, tail, version, envContractId);
+      console.log(`[Setup] Using contract id #${contractId} for ${version}`);
+      return { contractId, scriptName };
+    }
+    throw e;
+  }
+}
 
 function contractLookupKey(tenantId: string, tail: string, version: string): string {
   return `${tenantId}:${tail}:${version}`;
@@ -77,30 +135,12 @@ export async function setupPrivaLendTenant(): Promise<TenantDeployment> {
   const CONTRACT_VERSION = "0.2.2";
   const WASM_PATH = resolve(import.meta.dirname, "../../contracts/privalend/target/wasm32-wasip2/release/z_privalend.wasm");
 
-  const tenantId = auth.did.slice("did:t3n:".length);
-  const scriptName = `z:${tenantId}:${CONTRACT_TAIL}`;
-
-  // Try to register; if version already exists, just connect to it
-  let contractId: number;
-  try {
-    const wasmBytes = await readFile(WASM_PATH);
-    console.log(`[Setup] Registering PrivaLend contract (${wasmBytes.length} bytes)...`);
-    const result = (await auth.tenantClient.contracts.register({
-      tail: CONTRACT_TAIL,
-      version: CONTRACT_VERSION,
-      wasm: wasmBytes,
-    })) as { contract_id: number };
-    contractId = result.contract_id;
-    console.log(`[Setup] Registered ${scriptName} as contract id ${contractId}`);
-  } catch (e: any) {
-    if (e.message?.includes("is not higher than current version")) {
-      console.log(`[Setup] Contract already deployed at ${scriptName} — connecting to existing`);
-      contractId = resolveExistingContractId(auth, CONTRACT_TAIL, CONTRACT_VERSION, config.privalend.contractId);
-      console.log(`[Setup] Using contract id #${contractId} for ${CONTRACT_VERSION}`);
-    } else {
-      throw e;
-    }
-  }
+  const { contractId, scriptName } = await resolveOrRegisterContract(auth, {
+    tail: CONTRACT_TAIL,
+    version: CONTRACT_VERSION,
+    wasmPath: WASM_PATH,
+    envContractId: config.privalend.contractId,
+  });
 
   // Create secrets map (stores lender API keys)
   try {
@@ -163,29 +203,12 @@ export async function setupConsortiumTenant(): Promise<TenantDeployment> {
   const CONTRACT_VERSION = "0.1.1";
   const WASM_PATH = resolve(import.meta.dirname, "../../contracts/fraud-consortium/target/wasm32-wasip2/release/z_fraud_consortium.wasm");
 
-  const tenantId = auth.did.slice("did:t3n:".length);
-  const scriptName = `z:${tenantId}:${CONTRACT_TAIL}`;
-
-  let contractId: number;
-  try {
-    const wasmBytes = await readFile(WASM_PATH);
-    console.log(`[Setup] Registering Fraud Consortium contract (${wasmBytes.length} bytes)...`);
-    const result = (await auth.tenantClient.contracts.register({
-      tail: CONTRACT_TAIL,
-      version: CONTRACT_VERSION,
-      wasm: wasmBytes,
-    })) as { contract_id: number };
-    contractId = result.contract_id;
-    console.log(`[Setup] Registered ${scriptName} as contract id ${contractId}`);
-  } catch (e: any) {
-    if (e.message?.includes("is not higher than current version")) {
-      console.log(`[Setup] Contract already deployed at ${scriptName} — connecting to existing`);
-      contractId = resolveExistingContractId(auth, CONTRACT_TAIL, CONTRACT_VERSION, config.consortium.contractId);
-      console.log(`[Setup] Using contract id #${contractId} for ${CONTRACT_VERSION}`);
-    } else {
-      throw e;
-    }
-  }
+  const { contractId, scriptName } = await resolveOrRegisterContract(auth, {
+    tail: CONTRACT_TAIL,
+    version: CONTRACT_VERSION,
+    wasmPath: WASM_PATH,
+    envContractId: config.consortium.contractId,
+  });
 
   // Create fraud_blacklist map
   try {
