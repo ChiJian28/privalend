@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { appEnv, truncateDidForDisplay } from "@/lib/env";
 
 interface Props {
   active: boolean;
@@ -23,7 +24,7 @@ const ATTACK_LINES = [
 const BLOCK_MESSAGE = `[🚨 TEE SECURITY OVERRIDE]
 
 FATAL: Memory access violation detected.
-SOURCE: Agent DID did:t3n:5e3d9ba2...
+SOURCE: Agent DID ${truncateDidForDisplay(appEnv.agentDid)}
 REASON: Agent lacks 'user_profile_read' capability.
 DETAIL: Contract sandbox boundary enforced by Intel TDX.
 

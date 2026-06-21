@@ -2,8 +2,6 @@
  * PrivaLend has exactly ONE AI agent: PrivaLend Agent (orchestrator).
  * Six parties on the graph: User, KV Vault, Agent, TEE, Fraud Consortium, Lender.
  */
-export const PRIVALEND_AGENT_DID = "did:t3n:5e3d9ba298d2ec5ab8913965fac01435560cf8ee";
-
 export type PartyId =
   | "user"
   | "vault"

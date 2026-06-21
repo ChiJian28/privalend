@@ -3,6 +3,13 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { io, type Socket } from "socket.io-client";
 import { buildDemoCredential, clearWalletDemoStorage, type CredentialIssueResult } from "@/lib/credential";
+import {
+  appEnv,
+  DEMO_USER_DIDS,
+  fraudCheckScriptName,
+  privalendScriptName,
+  truncateDidForDisplay,
+} from "@/lib/env";
 
 export type WorkflowStep = 0 | 1 | 2 | 3 | 4;
 
@@ -55,7 +62,7 @@ export interface WorkflowState {
   reset: () => void;
 }
 
-const BACKEND_URL = "http://localhost:3001";
+const BACKEND_URL = appEnv.backendUrl;
 let eventCounter = 0;
 
 function createEvent(partial: Omit<InspectorEvent, "id" | "timestamp">): InspectorEvent {
@@ -88,7 +95,7 @@ export function useWorkflow(): WorkflowState {
   const [applicationResult, setApplicationResult] = useState<WorkflowState["applicationResult"]>(null);
   const [credential, setCredential] = useState<CredentialIssueResult | null>(null);
   const [connected, setConnected] = useState(false);
-  const userDidRef = useRef("did:t3n:demo_user_alan_turing");
+  const userDidRef = useRef<string>(DEMO_USER_DIDS.alan);
   const sessionIdRef = useRef<string | null>(null);
   const socketRef = useRef<Socket | null>(null);
   /** When true, UI step progression is driven by startWorkflow/selectOffer — not WS events. */
@@ -227,15 +234,15 @@ export function useWorkflow(): WorkflowState {
     // === SIMULATED MODE (fallback) ===
     // Resolve profile data for simulation
     const personas = {
-      alice: { income: 150000, debt: 10000, nationality: "US", userDid: "did:t3n:demo_user_alice", flagged: false },
-      bob: { income: 45000, debt: 35000, nationality: "UK", userDid: "did:t3n:demo_user_bob_flagged", flagged: true },
-      charlie: { income: 52000, debt: 28000, nationality: "SG", userDid: "did:t3n:demo_user_charlie", flagged: false },
+      alice: { income: 150000, debt: 10000, nationality: "US", userDid: DEMO_USER_DIDS.alice, flagged: false },
+      bob: { income: 45000, debt: 35000, nationality: "UK", userDid: DEMO_USER_DIDS.bob, flagged: true },
+      charlie: { income: 52000, debt: 28000, nationality: "SG", userDid: DEMO_USER_DIDS.charlie, flagged: false },
     };
 
     let simIncome = 85000;
     let simDebt = 12000;
     let simNationality = "SG";
-    let simUserDid = "did:t3n:demo_user_alan_turing";
+    let simUserDid: string = DEMO_USER_DIDS.alan;
     let simFlagged = false;
 
     if (options?.persona && personas[options.persona]) {
@@ -246,7 +253,7 @@ export function useWorkflow(): WorkflowState {
       simIncome = options.profile.annual_income;
       simDebt = options.profile.total_debt;
       simNationality = options.profile.nationality;
-      simUserDid = "did:t3n:custom_user";
+      simUserDid = DEMO_USER_DIDS.custom;
     }
 
     userDidRef.current = simUserDid;
@@ -280,7 +287,7 @@ export function useWorkflow(): WorkflowState {
     addEvent({ type: "system", step: 1, title: "Initializing T3N Connection", content: "setEnvironment(\"testnet\")\nLoading WASM cryptographic component...", highlight: "blue" });
     await delay(800);
 
-    addEvent({ type: "system", step: 1, title: "Agent Authentication", content: "await t3n.handshake()\nawait t3n.authenticate(createEthAuthInput(address))\n\nAgent DID: did:t3n:5e3d9ba298d2ec5ab8913965fac01435560cf8ee\n✓ Encrypted channel established (post-quantum)", highlight: "blue" });
+    addEvent({ type: "system", step: 1, title: "Agent Authentication", content: `await t3n.handshake()\nawait t3n.authenticate(createEthAuthInput(address))\n\nAgent DID: ${appEnv.agentDid}\n✓ Encrypted channel established (post-quantum)`, highlight: "blue" });
     await delay(600);
 
     if (options?.profile) {
@@ -289,13 +296,13 @@ export function useWorkflow(): WorkflowState {
     }
 
     addEvent({ type: "agent_action", step: 1, title: "agent-auth-update (User Delegation)", content: JSON.stringify({
-      agentDid: "did:t3n:5e3d9ba298d2ec5ab8913965fac01435560cf8ee",
+      agentDid: appEnv.agentDid,
       scripts: [{
-        scriptName: "z:8b5e0d443d68570f4800da31e46d1581d603b8db:privalend",
+        scriptName: privalendScriptName(),
         functions: ["assess-eligibility", "fetch-offers", "submit-application", "issue-credit-credential"],
         allowedHosts: ["localhost:4000"]
       }, {
-        scriptName: "z:377025df4be81d8222dd63ecf63a8b351bb109f2:fraud-check",
+        scriptName: fraudCheckScriptName(),
         functions: ["check-blacklist"],
         allowedHosts: []
       }]
@@ -304,16 +311,16 @@ export function useWorkflow(): WorkflowState {
 
     // Step 2: Cross-Tenant Fraud Check
     setStep(2);
-    addEvent({ type: "cross_tenant", step: 2, title: "Cross-Tenant Call → Fraud Consortium", content: `executeBusinessContract(\n  "z:377025df4be81d8222dd63ecf63a8b351bb109f2:fraud-check",\n  "check-blacklist"\n)\nInput: { user_did: "${simUserDid}" }`, highlight: "yellow" });
+    addEvent({ type: "cross_tenant", step: 2, title: "Cross-Tenant Call → Fraud Consortium", content: `executeBusinessContract(\n  "${fraudCheckScriptName()}",\n  "check-blacklist"\n)\nInput: { user_did: "${simUserDid}" }`, highlight: "yellow" });
     await delay(1200);
 
     if (simFlagged) {
-      addEvent({ type: "tee_simulated", step: 2, title: "Inside Consortium Enclave", content: `📍 TEE Node: Intel TDX Secure Enclave\n\nLooking up ${simUserDid}\nin z:377025df...:fraud_blacklist...\n\nBlacklist entries: 2\n⚠️ Match: FOUND\n\nReturning risk signal: CRITICAL`, highlight: "gray" });
+      addEvent({ type: "tee_simulated", step: 2, title: "Inside Consortium Enclave", content: `📍 TEE Node: Intel TDX Secure Enclave\n\nLooking up ${simUserDid}\nin ${fraudCheckScriptName().slice(0, 14)}...:fraud_blacklist...\n\nBlacklist entries: 2\n⚠️ Match: FOUND\n\nReturning risk signal: CRITICAL`, highlight: "gray" });
       await delay(800);
 
       const fraud = { is_flagged: true, risk_level: "critical" };
       setFraudResult(fraud);
-      addEvent({ type: "agent_received", step: 2, title: "Agent Received (Fraud Result)", content: JSON.stringify({ is_flagged: true, risk_level: "critical", checked_at: new Date().toISOString(), consortium_id: "did:t3n:377025df4be81d8222dd63ecf63a8b351bb109f2" }, null, 2), highlight: "red" });
+      addEvent({ type: "agent_received", step: 2, title: "Agent Received (Fraud Result)", content: JSON.stringify({ is_flagged: true, risk_level: "critical", checked_at: new Date().toISOString(), consortium_id: appEnv.consortiumDid }, null, 2), highlight: "red" });
       await delay(600);
       addEvent({ type: "error", step: 2, title: "Application Rejected — Fraud Blacklist", content: "User flagged in industry fraud blacklist.\nApplication terminated.\n\nThis demonstrates cross-tenant data sharing:\nThe Consortium reveals only a boolean signal,\nnot WHY the user was flagged.", highlight: "red" });
 
@@ -322,16 +329,16 @@ export function useWorkflow(): WorkflowState {
       return;
     }
 
-    addEvent({ type: "tee_simulated", step: 2, title: "Inside Consortium Enclave (Simulated)", content: `📍 TEE Node: Intel TDX Secure Enclave\n\nLooking up ${simUserDid}\nin z:377025df...:fraud_blacklist...\n\nBlacklist entries: 2\nMatch: NOT FOUND ✓\n\n⚠️ Blacklist data never leaves this enclave.\nReturning risk signal only.`, highlight: "gray" });
+    addEvent({ type: "tee_simulated", step: 2, title: "Inside Consortium Enclave (Simulated)", content: `📍 TEE Node: Intel TDX Secure Enclave\n\nLooking up ${simUserDid}\nin ${fraudCheckScriptName().slice(0, 14)}...:fraud_blacklist...\n\nBlacklist entries: 2\nMatch: NOT FOUND ✓\n\n⚠️ Blacklist data never leaves this enclave.\nReturning risk signal only.`, highlight: "gray" });
     await delay(800);
 
     const fraud = { is_flagged: false, risk_level: "low" };
     setFraudResult(fraud);
-    addEvent({ type: "agent_received", step: 2, title: "Agent Received (Fraud Result)", content: JSON.stringify({ is_flagged: false, risk_level: "low", checked_at: new Date().toISOString(), consortium_id: "did:t3n:377025df4be81d8222dd63ecf63a8b351bb109f2" }, null, 2), highlight: "green" });
+      addEvent({ type: "agent_received", step: 2, title: "Agent Received (Fraud Result)", content: JSON.stringify({ is_flagged: false, risk_level: "low", checked_at: new Date().toISOString(), consortium_id: appEnv.consortiumDid }, null, 2), highlight: "green" });
     await delay(600);
 
     // Credit Assessment
-    addEvent({ type: "agent_action", step: 2, title: "Credit Assessment Call", content: `executeAndDecode(\n  "z:8b5e0d443d68570f4800da31e46d1581d603b8db:privalend",\n  "assess-eligibility"\n)\nInput: { fraud_result: { is_flagged: false }, loan_amount: 50000 }\n\n🔐 User financial data resolved inside TEE only.`, highlight: "blue" });
+    addEvent({ type: "agent_action", step: 2, title: "Credit Assessment Call", content: `executeAndDecode(\n  "${privalendScriptName()}",\n  "assess-eligibility"\n)\nInput: { fraud_result: { is_flagged: false }, loan_amount: 50000 }\n\n🔐 User financial data resolved inside TEE only.`, highlight: "blue" });
     await delay(1000);
 
     addEvent({ type: "tee_simulated", step: 2, title: "Inside PrivaLend Enclave", content: `📍 TEE Node: Intel TDX Secure Enclave\n\nFetching user financial profile from KV store...\n  → Annual Income: $${simIncome.toLocaleString()}\n  → Total Debt: $${simDebt.toLocaleString()}\n  → Nationality: ${simNationality}\n\nComputing credit score...\n  DTI Ratio: ${(dti * 100).toFixed(1)}%\n  Score: ${simScore} (${simTier.toUpperCase()})\n  Max Loan: $${Math.round(simMaxLoan).toLocaleString()}\n\n⚠️ Raw financial data destroyed in enclave memory.`, highlight: "gray" });
@@ -344,7 +351,7 @@ export function useWorkflow(): WorkflowState {
 
     // Step 3: Fetch Offers with dynamic pricing
     setStep(3);
-    addEvent({ type: "agent_action", step: 3, title: "Fetching Loan Offers (Dynamic Pricing)", content: `executeAndDecode("z:6ec1a6...:privalend", "fetch-offers")\nUsing http::call → Lender APIs\nInput: { tier: "${simTier}", score: ${simScore}, amount: 50000, term: 36 }\n\n📊 Dynamic Rate = 4.0% + (850 - ${simScore}) × 0.02% = ${dynamicBaseRate}%\n🔒 No PII sent in this request.`, highlight: "blue" });
+    addEvent({ type: "agent_action", step: 3, title: "Fetching Loan Offers (Dynamic Pricing)", content: `executeAndDecode("${privalendScriptName()}", "fetch-offers")\nUsing http::call → Lender APIs\nInput: { tier: "${simTier}", score: ${simScore}, amount: 50000, term: 36 }\n\n📊 Dynamic Rate = 4.0% + (850 - ${simScore}) × 0.02% = ${dynamicBaseRate}%\n🔒 No PII sent in this request.`, highlight: "blue" });
     await delay(1000);
 
     function calcMonthly(principal: number, annualRate: number, months: number): number {
@@ -425,7 +432,7 @@ export function useWorkflow(): WorkflowState {
       const result = { status: "approved", reference: "PL-DBS-2026A7F", lender: selected.lender };
       setApplicationResult(result);
 
-      addEvent({ type: "audit_log", step: 4, title: "Immutable Audit Trail (Merkle-backed)", content: `[${new Date().toISOString()}] Loan application complete\n\n  ┌─────────────────────────────────────────┐\n  │ Agent DID:  did:t3n:5e3d9ba2...         │\n  │ User DID:   ${userDidRef.current.slice(0, 28).padEnd(28)}│\n  │ Lender:     ${selected.lender.padEnd(28)}│\n  │ Amount:     $50,000                     │\n  │ Reference:  PL-DBS-2026A7F              │\n  ├─────────────────────────────────────────┤\n  │ PII Exposure to Agent: 0 bytes   ✓      │\n  │ Cross-Tenant Calls:    1 (Consortium)   │\n  │ Placeholder Fields:    5 resolved       │\n  │ Fraud Check:           PASSED           │\n  └─────────────────────────────────────────┘`, highlight: "blue" });
+      addEvent({ type: "audit_log", step: 4, title: "Immutable Audit Trail (Merkle-backed)", content: `[${new Date().toISOString()}] Loan application complete\n\n  ┌─────────────────────────────────────────┐\n  │ Agent DID:  ${truncateDidForDisplay(appEnv.agentDid).padEnd(28)}│\n  │ User DID:   ${userDidRef.current.slice(0, 28).padEnd(28)}│\n  │ Lender:     ${selected.lender.padEnd(28)}│\n  │ Amount:     $50,000                     │\n  │ Reference:  PL-DBS-2026A7F              │\n  ├─────────────────────────────────────────┤\n  │ PII Exposure to Agent: 0 bytes   ✓      │\n  │ Cross-Tenant Calls:    1 (Consortium)   │\n  │ Placeholder Fields:    5 resolved       │\n  │ Fraud Check:           PASSED           │\n  └─────────────────────────────────────────┘`, highlight: "blue" });
       await delay(600);
 
       const vcResult = buildDemoCredential({

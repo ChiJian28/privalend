@@ -302,6 +302,7 @@ export function CommandCenter({
             term: 36,
             creditScore: workflow.eligibility?.score,
             tier: workflow.eligibility?.tier,
+            userDid: workflow.credential?.credential.credentialSubject.id,
           }} />
         )}
 

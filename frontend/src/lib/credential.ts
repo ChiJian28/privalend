@@ -1,4 +1,4 @@
-export const PRIVALEND_ISSUER_DID = "did:t3n:8b5e0d443d68570f4800da31e46d1581d603b8db";
+import { appEnv } from "@/lib/env";
 
 export interface CreditCredentialProof {
   type: string;
@@ -87,7 +87,7 @@ export function buildDemoCredential(input: {
       ],
       id: `https://privalend.demo/credentials/${input.reference}`,
       type: ["VerifiableCredential", "CreditTierCredential"],
-      issuer: PRIVALEND_ISSUER_DID,
+      issuer: appEnv.privalendDid,
       issuanceDate,
       expirationDate,
       credentialSubject: {
@@ -103,7 +103,7 @@ export function buildDemoCredential(input: {
         type: "Ed25519Signature2020",
         created: issuanceDate,
         proofPurpose: "assertionMethod",
-        verificationMethod: `${PRIVALEND_ISSUER_DID}#keys-1`,
+        verificationMethod: `${appEnv.privalendDid}#keys-1`,
         proofValue: "z" + hashSeed(proofSeed, 43),
         jws: btoa(JSON.stringify({ alg: "ES256", demo: proofSeed.slice(0, 16) })),
         pending: "Demo signature — awaiting T3N sign-sd-jwt-vc on testnet",

@@ -1,9 +1,8 @@
 import { createHash } from "crypto";
 import { emitInspectorEvent } from "../websocket.js";
+import { config } from "../config.js";
 import type { TenantDeployment } from "./tenant-setup.js";
 import type { createAgentClient } from "./client.js";
-
-export const PRIVALEND_ISSUER_DID = "did:t3n:8b5e0d443d68570f4800da31e46d1581d603b8db";
 
 export interface CreditCredentialProof {
   type: string;
@@ -78,13 +77,13 @@ function generateProofValue(seed: string): string {
 
 function generateDemoJws(seed: string): string {
   const header = Buffer.from(JSON.stringify({ alg: "ES256", typ: "JWT" })).toString("base64url");
-  const payload = Buffer.from(JSON.stringify({ iss: PRIVALEND_ISSUER_DID, vc: seed.slice(0, 16) })).toString("base64url");
+  const payload = Buffer.from(JSON.stringify({ iss: config.privalend.did, vc: seed.slice(0, 16) })).toString("base64url");
   const sig = createHash("sha256").update(seed + "jws").digest("base64url");
   return `${header}.${payload}.${sig}`;
 }
 
 export function buildDemoCredential(input: CreditCredentialInput): CreditCredential {
-  const issuerDid = input.issuerDid ?? PRIVALEND_ISSUER_DID;
+  const issuerDid = input.issuerDid ?? config.privalend.did;
   const issuanceDate = new Date().toISOString();
   const expirationDate = addMonths(issuanceDate, 12);
   const tierLabel = tierDisplay(input.tier, input.score);

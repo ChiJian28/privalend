@@ -2,6 +2,7 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { appEnv } from "@/lib/env";
 
 interface AuditData {
   reference: string;
@@ -10,6 +11,7 @@ interface AuditData {
   term: number;
   creditScore?: number;
   tier?: string;
+  userDid?: string;
 }
 
 interface Props {
@@ -266,10 +268,10 @@ function CertificateModal({ data, onClose }: { data: AuditData; onClose: () => v
                 Identity & Actors
               </h3>
               <div className="bg-[#0c1220] rounded-lg border border-slate-800 overflow-hidden">
-                <ActorRow icon="👤" role="Data Owner (User)" did="did:t3n:demo_user_xxxxxxxx" />
-                <ActorRow icon="🤖" role="AI Agent (PrivaLend)" did="did:t3n:5e3d9ba298d2ec5ab8913965fac01435560cf8ee" />
-                <ActorRow icon="🏢" role="Processing Tenant" did="did:t3n:8b5e0d443d68570f4800da31e46d1581d603b8db" />
-                <ActorRow icon="🔗" role="Fraud Consortium" did="did:t3n:377025df4be81d8222dd63ecf63a8b351bb109f2" last />
+                <ActorRow icon="👤" role="Data Owner (User)" did={data.userDid ?? "did:t3n:demo_user_xxxxxxxx"} />
+                <ActorRow icon="🤖" role="AI Agent (PrivaLend)" did={appEnv.agentDid} />
+                <ActorRow icon="🏢" role="Processing Tenant" did={appEnv.privalendDid} />
+                <ActorRow icon="🔗" role="Fraud Consortium" did={appEnv.consortiumDid} last />
               </div>
             </div>
 
