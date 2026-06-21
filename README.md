@@ -5,13 +5,11 @@
 > Hackathon track: **Best Agent utilising Terminal 3 Agent Auth SDK**  
 > Built for the Terminal 3 Bounty Challenge (June 2026)
 
----
 
 ## Overview
 
 PrivaLend is a next-generation AI orchestrator that negotiates and applies for loans on behalf of the user without ever seeing the user's actual financial data or PII. By utilizing the Terminal 3 Network (T3N), PrivaLend shifts sensitive computations into hardware-attested Trusted Execution Environments (TEEs), ensuring absolute data privacy, cross-tenant fraud screening, and tamper-proof regulatory compliance.
 
----
 
 ## Problem Statement
 
@@ -23,7 +21,6 @@ Traditional loan agents need access to sensitive financial and identity data. Th
 
 Enterprises need agents that can **act on behalf of users** while staying inside privacy and data-governance boundaries.
 
----
 
 ## Solution
 
@@ -45,7 +42,6 @@ Prior to loan evaluation, the Agent performs a cross-tenant invocation to an ind
 
 When submitting an application to lenders, the Agent sends payload templates containing placeholders (e.g., `{{profile.name}}`) rather than actual user data. The T3N node securely resolves these placeholders immediately before HTTP egress, ensuring that plaintext data never appears in the Agent runtime.
 
----
 
 ## Key Features
 
@@ -73,7 +69,6 @@ Upon loan approval, PrivaLend issues a W3C-compliant Verifiable Credential (mock
 
 A custom-built UI that splits the user's perspective into two realities: The restricted Agent's context (left) and the privileged TEE Enclave's execution logs (right), all laid over a real-time, fluid SVG architecture diagram.
 
----
 
 ## T3 SDK Integration
 
@@ -86,7 +81,6 @@ A custom-built UI that splits the user's perspective into two realities: The res
 | **Outbound HTTP** | Designed `http::call` to fetch dynamic loan pricing from Bank APIs based on TEE-computed credit scores. | ✅ |
 | **Placeholders Egress** | Designed `http-with-placeholders` to inject PII into the bank application payload without Agent exposure. | ✅ |
 
----
 
 ## Tech Stack
 
@@ -97,7 +91,6 @@ A custom-built UI that splits the user's perspective into two realities: The res
 
 **UI scope:** Desktop/laptop viewport only. Not optimized for phones or tablets.
 
----
 
 ## Getting Started
 
@@ -156,7 +149,6 @@ cd frontend && npm run dev
 
 Open **http://localhost:3000**. The sidebar badge shows **LIVE** when connected to the backend WebSocket.
 
----
 
 ## Demo
 
@@ -172,7 +164,6 @@ https://github.com/user-attachments/assets/fee9e3f9-27fb-4714-940d-4a5e13e55ce7
 
 Additional demo features: Bob blacklist rejection, malicious-attack graph visualization, Audit Trail export, Verifiable Credit Credential card.
 
----
 
 ## Project Structure
 
@@ -210,7 +201,6 @@ terminal_3/
     └── package.json
 ```
 
----
 
 ## Future Work
 
@@ -222,4 +212,3 @@ As this repository was built specifically for the T3N Hackathon, certain design 
 
 - **Live Verifiable Credentials (VC)** — Once the `sign-sd-jwt-vc` endpoint moves from "Coming Soon" to "Live" on the T3N Testnet, the mock JSON-LD credentials generated at the end of the workflow will be replaced with actual cryptographic signatures anchored to the issuer's DID.
 
----
