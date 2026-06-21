@@ -111,7 +111,7 @@ A custom-built UI that splits the user's perspective into two realities: The res
 ### 1. Clone and install
 
 ```bash
-git clone <your-repo-url>
+git clone
 cd terminal_3
 
 cd backend && npm install
