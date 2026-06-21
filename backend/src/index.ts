@@ -1,4 +1,5 @@
-import express from "express";
+import { createRequire } from "node:module";
+import type { Request, Response } from "express";
 import cors from "cors";
 import { createServer } from "http";
 import { config } from "./config.js";
@@ -6,6 +7,9 @@ import { initWebSocket } from "./websocket.js";
 import { createApiRouter } from "./routes/api.js";
 import { startMockBankServer } from "./mock-bank/server.js";
 import { setupPrivaLendTenant, setupConsortiumTenant, type TenantDeployment } from "./t3n/tenant-setup.js";
+
+const require = createRequire(import.meta.url);
+const express = require("express") as typeof import("express");
 
 const app = express();
 app.use(cors());
@@ -18,7 +22,7 @@ let privalendDeployment: TenantDeployment | null = null;
 let consortiumDeployment: TenantDeployment | null = null;
 
 // Health check
-app.get("/health", (_req, res) => {
+app.get("/health", (_req: Request, res: Response) => {
   res.json({
     status: "ok",
     service: "privalend-backend",

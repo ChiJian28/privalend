@@ -105,11 +105,12 @@ export function Workspace({ workflow }: Props) {
       </div>
 
       {/* VS Code-style drag handle */}
-      <InspectorResizeHandle
-        onMouseDown={startDrag}
-        onDoubleClick={doubleClickHandle}
-        visible={!inspectorCollapsed}
-      />
+      {!inspectorCollapsed && (
+        <InspectorResizeHandle
+          onMouseDown={startDrag}
+          onDoubleClick={doubleClickHandle}
+        />
+      )}
 
       {/* Bottom inspector — pixel height, user-resizable */}
       <div

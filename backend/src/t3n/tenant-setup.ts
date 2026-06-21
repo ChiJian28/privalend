@@ -85,11 +85,11 @@ export async function setupPrivaLendTenant(): Promise<TenantDeployment> {
   try {
     const wasmBytes = await readFile(WASM_PATH);
     console.log(`[Setup] Registering PrivaLend contract (${wasmBytes.length} bytes)...`);
-    const result = await auth.tenantClient.contracts.register({
+    const result = (await auth.tenantClient.contracts.register({
       tail: CONTRACT_TAIL,
       version: CONTRACT_VERSION,
       wasm: wasmBytes,
-    });
+    })) as { contract_id: number };
     contractId = result.contract_id;
     console.log(`[Setup] Registered ${scriptName} as contract id ${contractId}`);
   } catch (e: any) {
@@ -170,11 +170,11 @@ export async function setupConsortiumTenant(): Promise<TenantDeployment> {
   try {
     const wasmBytes = await readFile(WASM_PATH);
     console.log(`[Setup] Registering Fraud Consortium contract (${wasmBytes.length} bytes)...`);
-    const result = await auth.tenantClient.contracts.register({
+    const result = (await auth.tenantClient.contracts.register({
       tail: CONTRACT_TAIL,
       version: CONTRACT_VERSION,
       wasm: wasmBytes,
-    });
+    })) as { contract_id: number };
     contractId = result.contract_id;
     console.log(`[Setup] Registered ${scriptName} as contract id ${contractId}`);
   } catch (e: any) {

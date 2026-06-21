@@ -1,5 +1,9 @@
-import express from "express";
+import { createRequire } from "node:module";
+import type { Request, Response } from "express";
 import { config } from "../config.js";
+
+const require = createRequire(import.meta.url);
+const express = require("express") as typeof import("express");
 
 const app = express();
 app.use(express.json());
@@ -23,7 +27,7 @@ function dynamicRate(creditScore: number): number {
  * POST /api/offers
  * Mock lender endpoint: returns loan offers based on credit score with dynamic pricing
  */
-app.post("/api/offers", (req, res) => {
+app.post("/api/offers", (req: Request, res: Response) => {
   const { tier, requested_amount, term_months, purpose, credit_score } = req.body;
 
   console.log(`[MockBank] Received offer request: tier=${tier}, credit_score=${credit_score}, amount=$${requested_amount}`);
@@ -81,7 +85,7 @@ app.post("/api/offers", (req, res) => {
  * Mock lender endpoint: receives loan application WITH resolved PII
  * (T3N node has already replaced {{profile.*}} placeholders with real data)
  */
-app.post("/api/applications", (req, res) => {
+app.post("/api/applications", (req: Request, res: Response) => {
   const payload = req.body;
   const lender = req.headers["x-lender"] || "Unknown";
 
@@ -107,7 +111,7 @@ app.post("/api/applications", (req, res) => {
  * Returns the last payload received by the mock bank.
  * Frontend uses this to show the "Bank Actually Received" panel.
  */
-app.get("/last-received", (_req, res) => {
+app.get("/last-received", (_req: Request, res: Response) => {
   if (!lastReceivedPayload) {
     return res.status(404).json({ error: "No applications received yet" });
   }
@@ -121,7 +125,7 @@ app.get("/last-received", (_req, res) => {
 /**
  * GET /health
  */
-app.get("/health", (_req, res) => {
+app.get("/health", (_req: Request, res: Response) => {
   res.json({ status: "ok", service: "mock-bank-api" });
 });
 
