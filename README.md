@@ -160,7 +160,7 @@ Open **http://localhost:3000**. The sidebar badge shows **LIVE** when connected 
 
 ## Demo
 
-<!-- TODO: Embed your demo video here -->
+https://github.com/user-attachments/assets/fee9e3f9-27fb-4714-940d-4a5e13e55ce7
 
 **End-to-end flow:**
 
